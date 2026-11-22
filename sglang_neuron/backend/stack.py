@@ -293,6 +293,50 @@ def cache_builtin_dialect_lookup() -> None:
         sys.modules[MLIR_BUILTIN_DIALECT] = types.ModuleType(MLIR_BUILTIN_DIALECT)
 
 
+def cache_traceback_frame_formatting() -> None:
+    """Memoize ``traceback.StackSummary.format_frame_summary`` for frames without locals.
+
+    Dynamo's ``SubgraphTracer._create_proxy`` formats the Python call stack for every FX node, and Python 3.11+ parses
+    each source line with ``ast.parse`` to draw caret anchors. Tracing a multi-layer model hits the same few hundred
+    call sites tens of thousands of times; caching by the frame's source location returns the identical formatted
+    string without reparsing the AST.
+    """
+    import traceback
+
+    original = getattr(traceback.StackSummary, "format_frame_summary", None)
+    if original is None or getattr(original, "_sgn_cached", False):
+        return
+    cache: dict = {}
+
+    def format_frame_summary(self, frame_summary, **kwargs):
+        if (
+            frame_summary.locals is None
+            and type(self) is traceback.StackSummary
+            and (not kwargs or (len(kwargs) == 1 and "colorize" in kwargs))
+        ):
+            key = (
+                frame_summary.filename,
+                frame_summary.lineno,
+                frame_summary.end_lineno,
+                frame_summary.colno,
+                frame_summary.end_colno,
+                frame_summary.name,
+                getattr(frame_summary, "_lines", getattr(frame_summary, "_line", None)),
+                kwargs.get("colorize", False) if kwargs else False,
+            )
+            cached = cache.get(key)
+            if cached is not None:
+                return cached
+            result = original(self, frame_summary, **kwargs)
+            if len(cache) < 16384:
+                cache[key] = result
+            return result
+        return original(self, frame_summary, **kwargs)
+
+    format_frame_summary._sgn_cached = True
+    traceback.StackSummary.format_frame_summary = format_frame_summary
+
+
 NKI_TRACE_CACHE_OFF = "NKI_DISABLE_TRACE_CACHE"
 
 
