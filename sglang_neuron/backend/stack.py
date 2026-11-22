@@ -277,6 +277,22 @@ def disable_vocab_sharding_pass(environ=None) -> None:
     environ[VOCAB_SHARDING_PASS] = "1"
 
 
+MLIR_BUILTIN_DIALECT = "torch_mlir.dialects.builtin"
+
+
+def cache_builtin_dialect_lookup() -> None:
+    """Put an empty module at ``torch_mlir.dialects.builtin`` when it fails to import (torch-neuronx's torch-mlir has
+    no ``extras/meta.py``), so MLIR's dialect lookup stops retrying the import on every type or op it downcasts."""
+    import importlib
+    import sys
+    import types
+
+    try:
+        importlib.import_module(MLIR_BUILTIN_DIALECT)
+    except ImportError:
+        sys.modules[MLIR_BUILTIN_DIALECT] = types.ModuleType(MLIR_BUILTIN_DIALECT)
+
+
 NKI_TRACE_CACHE_OFF = "NKI_DISABLE_TRACE_CACHE"
 
 

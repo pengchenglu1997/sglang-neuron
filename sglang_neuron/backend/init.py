@@ -70,6 +70,7 @@ def _init_torchneuronx_backend() -> None:
     if not hasattr(torch_neuronx, "nki_hop"):
         raise RuntimeError(f"torch_neuronx at {torch_neuronx.__file__} is not torch-neuronx's native backend (no "
                            "torch_neuronx.nki_hop)")
+    stack.cache_builtin_dialect_lookup()
     import torch._dynamo
 
     if "neuron" not in torch._dynamo.list_backends(exclude_tags=()):
