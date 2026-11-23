@@ -17,6 +17,8 @@ from __future__ import annotations
 import contextlib
 import functools
 import importlib
+import importlib.machinery
+import linecache
 import sys
 import threading
 import traceback
@@ -282,55 +284,71 @@ def disable_vocab_sharding_pass(environ=None) -> None:
 
 
 MLIR_BUILTIN_DIALECT = "torch_mlir.dialects.builtin"
+_MISSING_MLIR_EXTRA = "torch_mlir.extras.meta"
 
 
 def cache_builtin_dialect_lookup() -> None:
-    """Put an empty module at ``torch_mlir.dialects.builtin`` when it fails to import (torch-neuronx's torch-mlir has
-    no ``extras/meta.py``), so MLIR's dialect lookup stops retrying the import on every type or op it downcasts."""
+    """Install an empty module stub at ``torch_mlir.dialects.builtin`` when importing it fails on missing
+    ``torch_mlir.extras.meta``."""
+    if MLIR_BUILTIN_DIALECT in sys.modules:
+        return
     try:
         importlib.import_module(MLIR_BUILTIN_DIALECT)
-    except ImportError:
-        sys.modules[MLIR_BUILTIN_DIALECT] = types.ModuleType(MLIR_BUILTIN_DIALECT)
+    except ModuleNotFoundError as exc:
+        if exc.name != _MISSING_MLIR_EXTRA:
+            return
+        stub = types.ModuleType(MLIR_BUILTIN_DIALECT)
+        stub.__spec__ = importlib.machinery.ModuleSpec(MLIR_BUILTIN_DIALECT, loader=None)
+        sys.modules[MLIR_BUILTIN_DIALECT] = stub
 
 
 def cache_traceback_frame_formatting() -> None:
-    """Memoize ``traceback.StackSummary.format_frame_summary`` for frames without locals.
-
-    Dynamo's ``SubgraphTracer._create_proxy`` formats the Python call stack for every FX node, and Python 3.11+ parses
-    each source line with ``ast.parse`` to draw caret anchors. Tracing a multi-layer model hits the same few hundred
-    call sites tens of thousands of times; caching by the frame's source location returns the identical formatted
-    string without reparsing the AST.
-    """
+    """Memoize ``traceback.StackSummary.format_frame_summary`` while Dynamo is tracing."""
     original = getattr(traceback.StackSummary, "format_frame_summary", None)
     if original is None or getattr(original, "_sgn_cached", False):
         return
-    # Python 3.14 renamed FrameSummary._line to _lines; resolve once at install time.
+    from torch._guards import TracingContext
+
     line_attr = "_lines" if "_lines" in getattr(traceback.FrameSummary, "__slots__", ()) else "_line"
     cache: dict = {}
 
     def format_frame_summary(self, frame_summary, **kwargs):
         if (
-            frame_summary.locals is not None
+            TracingContext.try_get() is None
+            or frame_summary.locals is not None
+            or getattr(frame_summary, "_code", None) is not None
             or type(self) is not traceback.StackSummary
             or (kwargs and (len(kwargs) != 1 or "colorize" not in kwargs))
         ):
             return original(self, frame_summary, **kwargs)
+        filename = frame_summary.filename
+        if filename.startswith("<") and filename.endswith(">"):
+            return original(self, frame_summary, **kwargs)
+        lc_entry = linecache.cache.get(filename)
+        lc_tag = lc_entry[:2] if lc_entry is not None and len(lc_entry) >= 2 else None
+        colorize = bool(kwargs.get("colorize", False))
         key = (
-            frame_summary.filename,
+            filename,
             frame_summary.lineno,
             frame_summary.end_lineno,
             frame_summary.colno,
             frame_summary.end_colno,
             frame_summary.name,
             getattr(frame_summary, line_attr, None),
-            bool(kwargs.get("colorize", False)),
+            lc_tag,
+            colorize,
         )
         cached = cache.get(key)
         if cached is not None:
             return cached
         result = original(self, frame_summary, **kwargs)
-        if len(cache) < 16384:
-            cache[key] = result
+        if lc_tag is None:
+            lc_entry = linecache.cache.get(filename)
+            lc_tag = lc_entry[:2] if lc_entry is not None and len(lc_entry) >= 2 else None
+            key = (*key[:7], lc_tag, colorize)
+        if len(cache) >= 16384:
+            cache.pop(next(iter(cache)), None)
+        cache[key] = result
         return result
 
     format_frame_summary._sgn_cached = True

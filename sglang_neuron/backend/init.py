@@ -59,6 +59,7 @@ def _init_torchneuronx_backend() -> None:
     if envs.SGLANG_NEURON_CPU_MODE:
         # CPU tests run without the Neuron runtime (TORCH_DEVICE_BACKEND_AUTOLOAD=0 keeps torch from loading it)
         _init_cpu_mode_device()
+        stack.cache_traceback_frame_formatting()
         return
 
     # before the runtime starts: from here on the compile scopes only replace these values (reserve_compiler_env)
