@@ -284,22 +284,25 @@ def disable_vocab_sharding_pass(environ=None) -> None:
 
 
 MLIR_BUILTIN_DIALECT = "torch_mlir.dialects.builtin"
-_MISSING_MLIR_EXTRA = "torch_mlir.extras.meta"
+_MISSING_MLIR_EXTRAS = ("torch_mlir.extras.meta", "torch_mlir.extras")
 
 
 def cache_builtin_dialect_lookup() -> None:
     """Install an empty module stub at ``torch_mlir.dialects.builtin`` when importing it fails on missing
-    ``torch_mlir.extras.meta``."""
+    ``torch_mlir.extras`` / ``torch_mlir.extras.meta``."""
     if MLIR_BUILTIN_DIALECT in sys.modules:
         return
     try:
         importlib.import_module(MLIR_BUILTIN_DIALECT)
-    except ModuleNotFoundError as exc:
-        if exc.name != _MISSING_MLIR_EXTRA:
+    except ImportError as exc:
+        if not isinstance(exc, ModuleNotFoundError) or exc.name not in _MISSING_MLIR_EXTRAS:
             return
         stub = types.ModuleType(MLIR_BUILTIN_DIALECT)
         stub.__spec__ = importlib.machinery.ModuleSpec(MLIR_BUILTIN_DIALECT, loader=None)
         sys.modules[MLIR_BUILTIN_DIALECT] = stub
+        dialects = sys.modules.get("torch_mlir.dialects")
+        if dialects is not None:
+            setattr(dialects, "builtin", stub)
 
 
 def cache_traceback_frame_formatting() -> None:
