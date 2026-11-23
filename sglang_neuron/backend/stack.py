@@ -306,32 +306,34 @@ def cache_traceback_frame_formatting() -> None:
     original = getattr(traceback.StackSummary, "format_frame_summary", None)
     if original is None or getattr(original, "_sgn_cached", False):
         return
+    # Python 3.14 renamed FrameSummary._line to _lines; resolve once at install time.
+    line_attr = "_lines" if "_lines" in getattr(traceback.FrameSummary, "__slots__", ()) else "_line"
     cache: dict = {}
 
     def format_frame_summary(self, frame_summary, **kwargs):
         if (
-            frame_summary.locals is None
-            and type(self) is traceback.StackSummary
-            and (not kwargs or (len(kwargs) == 1 and "colorize" in kwargs))
+            frame_summary.locals is not None
+            or type(self) is not traceback.StackSummary
+            or (kwargs and (len(kwargs) != 1 or "colorize" not in kwargs))
         ):
-            key = (
-                frame_summary.filename,
-                frame_summary.lineno,
-                frame_summary.end_lineno,
-                frame_summary.colno,
-                frame_summary.end_colno,
-                frame_summary.name,
-                getattr(frame_summary, "_lines", getattr(frame_summary, "_line", None)),
-                kwargs.get("colorize", False) if kwargs else False,
-            )
-            cached = cache.get(key)
-            if cached is not None:
-                return cached
-            result = original(self, frame_summary, **kwargs)
-            if len(cache) < 16384:
-                cache[key] = result
-            return result
-        return original(self, frame_summary, **kwargs)
+            return original(self, frame_summary, **kwargs)
+        key = (
+            frame_summary.filename,
+            frame_summary.lineno,
+            frame_summary.end_lineno,
+            frame_summary.colno,
+            frame_summary.end_colno,
+            frame_summary.name,
+            getattr(frame_summary, line_attr, None),
+            bool(kwargs.get("colorize", False)),
+        )
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
+        result = original(self, frame_summary, **kwargs)
+        if len(cache) < 16384:
+            cache[key] = result
+        return result
 
     format_frame_summary._sgn_cached = True
     traceback.StackSummary.format_frame_summary = format_frame_summary
