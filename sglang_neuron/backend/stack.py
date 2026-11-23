@@ -16,7 +16,11 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import importlib
+import sys
 import threading
+import traceback
+import types
 from typing import Any, Iterator, List
 
 from sglang_neuron.backend import envs
@@ -283,10 +287,6 @@ MLIR_BUILTIN_DIALECT = "torch_mlir.dialects.builtin"
 def cache_builtin_dialect_lookup() -> None:
     """Put an empty module at ``torch_mlir.dialects.builtin`` when it fails to import (torch-neuronx's torch-mlir has
     no ``extras/meta.py``), so MLIR's dialect lookup stops retrying the import on every type or op it downcasts."""
-    import importlib
-    import sys
-    import types
-
     try:
         importlib.import_module(MLIR_BUILTIN_DIALECT)
     except ImportError:
@@ -301,8 +301,6 @@ def cache_traceback_frame_formatting() -> None:
     call sites tens of thousands of times; caching by the frame's source location returns the identical formatted
     string without reparsing the AST.
     """
-    import traceback
-
     original = getattr(traceback.StackSummary, "format_frame_summary", None)
     if original is None or getattr(original, "_sgn_cached", False):
         return
