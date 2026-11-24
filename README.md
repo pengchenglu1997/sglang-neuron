@@ -33,7 +33,7 @@
 > | `integration` | `main` plus upstream PRs 20, 4, 9, 16, 17, 18 ([decisions and reasons](docs/rl/UPSTREAM_PRS.md)) | compiles; not run by us on hardware |
 > | `upstream-pr/<N>` | unchanged heads of the upstream PRs we carry or track | by their authors |
 >
-> Experiment scripts, session records and planning documents are in
+> Experiment scripts and session records are in
 > [pengchenglu1997/trainium-sglang-rl](https://github.com/pengchenglu1997/trainium-sglang-rl).
 >
 > Everything below this box is the upstream README.
