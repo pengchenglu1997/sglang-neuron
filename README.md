@@ -1,5 +1,25 @@
 # sglang-neuron
 
+> **About this fork.** This is a working fork of [sgl-project/sglang-neuron](https://github.com/sgl-project/sglang-neuron)
+> for reinforcement-learning post-training on AWS Trainium2: a rollout server that takes new weights and LoRA adapters
+> in place, on larger models, with kernel-level optimisations that are measured before they are claimed.
+>
+> | Branch | What it holds | Tested how |
+> |---|---|---|
+> | `main` | upstream v0.1.0 plus the documents in [`docs/rl/`](docs/rl/). No code change. | - |
+> | `integration` | `main` plus upstream PRs 20, 4, 9, 16, 17, 18 ([decisions and reasons](docs/rl/UPSTREAM_PRS.md)) | compiles; **not run by us on hardware** |
+> | `feat/inplace-adapter-sync` | in-place weight update and LoRA adapter sync for RL rollout servers | trn2, Qwen3-0.6B and 8B; the lazy delta on CPU only |
+> | `feat/lora-merge-kernel` | LoRA shard-merge NKI kernel, off by default, with CPU tests in `tests/rlkit/` | NKI 0.7.0 CPU simulator only; **not run on hardware** |
+> | `upstream-pr/<N>` | unchanged heads of the upstream PRs we carry or track | by their authors |
+>
+> Start with [VISION.md](docs/rl/VISION.md) (goals and KPIs) and [ROADMAP.md](docs/rl/ROADMAP.md) (tasks). Then:
+> [LANDSCAPE.md](docs/rl/LANDSCAPE.md) (what exists that we build on), [METHOD.md](docs/rl/METHOD.md) (how results are
+> measured and accepted), [KERNELS.md](docs/rl/KERNELS.md), [RESULTS.md](docs/rl/RESULTS.md).
+> Experiment scripts and session records are in
+> [pengchenglu1997/trainium-sglang-rl](https://github.com/pengchenglu1997/trainium-sglang-rl).
+>
+> Everything below this box is the upstream README.
+
 sglang-neuron is an SGLang platform plugin for AWS Trainium. It serves large language models (LLMs) and diffusion
 models on NeuronCores through SGLang's own launcher, scheduler and APIs. SGLang itself stays unmodified: it finds the
 plugin through the platform and plugin entry points in `pyproject.toml`, and you select it with `SGLANG_PLATFORM=neuron`.

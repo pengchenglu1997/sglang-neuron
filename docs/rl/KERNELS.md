@@ -1,0 +1,311 @@
+# Kernels
+
+Status of the NKI kernel work for RL post-training on Trainium2 with SGLang-Neuron, as of 2026-11-23.
+
+Read this first:
+
+- No kernel in this fork has run on a NeuronCore. The LoRA merge kernel (branch `feat/lora-merge-kernel`) is tested only
+  in the NKI 0.7.0 CPU simulator. The sampler kernel is a design; no code exists.
+- Every number has a condition and a source file. Numbers marked "estimate" are not measurements. A "target" is a
+  target, with its basis.
+- All profile numbers in section 5 are Qwen3-0.6B, TP4, one run each.
+- Measured results that do not involve a kernel are in [RESULTS.md](RESULTS.md).
+
+Where this fits. Goal G3 is one or two NKI kernel optimisations with before/after numbers. The merge kernel serves the
+adapter update of the RL loop (section 1). The sampler kernel is the second candidate (section 2). Sections 3 and 4
+record what was looked at and not taken, so nobody repeats the search.
+
+## 1. LoRA shard-merge kernel
+
+### What it computes
+
+`lora_merge(base[IN,OUT] bf16, a_stack[K,IN], bt[K,OUT]) -> out[IN,OUT]`, with
+`out = bf16(float32(base) + a_stack.T @ bt)`. One cast to bf16, at the end.
+
+It runs on the device, per tensor-parallel rank and per adapted weight shard, from a resident copy of the base shard.
+Only the LoRA factors go from host to device. The serving graphs are not changed and not recompiled, so a decode or
+prefill step costs what it cost before.
+
+### Why
+
+At Qwen3-8B, TP4, rank 16 on q, k, v, o, gate, up and down, an adapter update on a running server takes 13.9-14.0 s in
+steady state (first update 35.8 s). Of that, 13.5-13.6 s is forming the delta matrices on the host and 0.3 s is the
+copy to the device. A full-checkpoint in-place update at 8B takes 4.7-6.2 s, so at 8B the adapter path is slower than
+the full path. (Source: `docs/NIGHT_RECORD_2026-11-21.md` section 4; one run each.)
+
+### Design in short
+
+- A bf16 copy of each adapted base shard stays on the device. The kernel reads it and writes the merged shard. The base
+  copy is never overwritten, so swapping adapter 1 for 2 for 1 returns the same weights by construction.
+- The factors are built per rank through the engine's own weight loaders (`weights.py` of SGLang-Neuron v0.1.0, commit
+  4e24326). That makes the fused qkv and gate_up layouts, the replicated KV heads, and the scale `alpha / r` follow the
+  engine and not a copy of its logic. The scale is folded into `bt`.
+- K (the stacked LoRA rank, 16 to 48 here) is the partition axis of both factor operands, so no transpose is needed on
+  the device. Fused segments (q, k, v) become a block-diagonal stack.
+- Tiles: 128 rows of IN, 512 columns of OUT (one fp32 PSUM bank). K above 128 is cut into chunks of 128 and
+  accumulated. The base tile cannot be preloaded into PSUM (undefined on this hardware generation per the NKI docs), so
+  the add of the base is done on the vector engine.
+- The cost: one bf16 copy of each adapted shard stays on the device, about 3.5 GB per rank at 8B (plan estimate; the
+  patch logs the real figure per update as "base copies kept on the device").
+- The design was chosen against two rejected designs; the rejected ones are not described here.
+
+### Where it sits in the patch
+
+The in-place update and adapter sync patch is on branch `feat/inplace-adapter-sync` (files
+`sglang_neuron/general_plugin.py`, `sglang_neuron/models/host.py`, `sglang_neuron/models/qwen3/sglang_model.py`). The
+kernel is on branch `feat/lora-merge-kernel`, on top of it: `sglang_neuron/models/rlkit_lora_merge.py`,
+`sglang_neuron/models/rlkit_kernel_path.py`, the kernel branch in `host.py`, and the CPU tests in `tests/rlkit/`. The host
+path stays the default.
+
+| Switch | Values | Meaning |
+|---|---|---|
+| `RLKIT_DEVICE_WRITE=kernel` | unset (host path) or `kernel` | use the kernel path for adapter updates |
+| `RLKIT_KERNEL_IMPL` | `auto`, `nki`, `torch`, `sim` | how the kernel runs: NKI on device, the same arithmetic in torch, or the simulator |
+| `RLKIT_KERNEL_FACTORS` | `fp32`, `split` | factor dtype; `split` carries fp32 factors as three bf16 parts (hi, hi, lo), less accurate than native fp32 in the simulator |
+| `RLKIT_KERNEL_CHECK` | `first`, `all`, `none` | read the live parameter back after the write: once per call form, shard shape, K and factor dtype, or every call, or never |
+| `RLKIT_ADAPTER_ON_DEVICE=1` | on/off | the older eager torch merge on the device (no NKI) |
+
+Guards. A parameter the kernel guard or the layout probe refuses (unaligned shard, K above 128, non-float32 factors)
+is merged on the host in the same update. Any failure of the kernel call or of the read-back check redoes the whole
+update on the host and turns the kernel mode off for that server. Two changes apply to both modes: adapter coverage is
+checked for all parameters before the first write, and adapters that set `use_rslora`, `use_dora`, `rank_pattern` or
+`alpha_pattern` are refused (the old code applied one scale `alpha / r` silently).
+
+### Status: CPU tests only
+
+Environment: WSL Ubuntu, NKI 0.7.0 simulator, Python 3.12, torch 2.15.0 CPU, 2026-11-23. Target platform override
+trn2. No `neuronx-cc` compile and no device run. The test scripts are in `tests/rlkit/` on branch
+`feat/lora-merge-kernel`; run them with `bash tests/rlkit/run_all.sh` (see `tests/rlkit/README.md`).
+
+| Test | What it checks | Result |
+|---|---|---|
+| `test_merge_kernel_sim.py` | zero adapter; integer factors; random factors; 20 alternating swaps; K 16, 32, 48; partial tiles; all 0.6B and 8B per-rank shapes (4 kinds each); LNC 1 vs 2 | all pass. Kernel equals the float32 reference on every entry. Against the float64 sum rounded once: 255 of 6,291,456 entries differ (8B qkv) to 735 of 25,165,824 (8B gate_up) |
+| `test_k_chunks.py` | K 144 and 200 (two accumulating matmuls), partial tiles, LNC 1 and 2, guards | 43 pass, 0 failed |
+| `test_factor_layout.py` | per-rank factors through the engine's loaders; integer factors bit-exact | 78 pass, 0 failed. qkv, o, gate_up, down at TP 1, 2, 4, 8, 16, every rank, 0.6B and 8B |
+| `negative_control_factor_layout.py` | wrong rank, forgotten scale, summed segments must fail | each mistake fails on 4 of 4 ranks |
+| `test_end_to_end_review.py` | loader, then builders, then kernel, against loader(base + full delta in float64) rounded once | 0 failed; 7 to 52 entries differ per shard, at most 1 to 18 units |
+| `test_host_kernel_path.py` | the patched `host.py` end to end on adapter folders on disk; real engine loaders, stubbed engine imports | 47 pass, 0 failed. At 0.6B TP4 in the simulator, live parameters equal an independent float32 reference on every entry (0 of 3,933,184 differ) and equal the patch's host path on every entry; they differ from the float64 sum rounded once in 255 (rank 0) and 244 (rank 3) entries |
+| mutation test of the wiring | 21 single faults planted | the test of that time caught 15. Of the 6 missed, 3 gave wrong weights; tests were added and now catch all 3. The other 3 changed no result in any scenario built (write before the check, the bf16 dtype guard, the probe-cache key) and have no test |
+
+What these tests do not show:
+
+- The output is "one bf16 rounding of an fp32 sum", not "the exact sum rounded once". About 1e-5 to 1e-4 of entries
+  differ from the exact rounding, mostly by 1 unit.
+- `test_host_kernel_path.py` is not a server run. SGLang is not installed in that environment, so the plugin's CPU
+  mode was not run.
+- Not done: a compile-only run with `neuronx-cc`; the call through torch (`wrap_nki`); reading a real PEFT adapter
+  (key names, dtypes); a performance number (the simulator is not a timing model).
+- Open for hardware only: whether a device tensor copied into a live parameter serves correctly. The eager torch device
+  merge (`RLKIT_ADAPTER_ON_DEVICE=1`) wrote values that differ from the host path by single units in under 0.005 % of
+  entries, yet the served output did not equal a restart on the host-merged checkpoint: same greedy tokens on two of
+  three test prompts with token logprobs 0.005-0.011 apart on average, and a fork at a near tie on the third
+  (`patches/PR_DRAFT_inplace_weight_update.md` in the public repo). The cause was not found. The kernel does not by
+  itself explain or remove that difference.
+
+### Target and acceptance (proposed, fixed before any hardware run)
+
+| Quantity (Qwen3-8B, TP4, rank 16 on seven projections) | Today | Target (proposed) |
+|---|---|---|
+| adapter swap, steady state | 13.9 s (host merge, measured 2026-11-21) | at most 1.5 s |
+| same adapter swapped back in | n/a | bit-identical weights and outputs |
+| vs a restart on a checkpoint merged by the same kernel | n/a | token logprob difference 0.0 |
+| decode step before and after a swap | same | same (compile-cache keys unchanged) |
+
+The 1.5 s is a proposed target and an estimate. Its basis is one measured number: 16.4 GB of 8B weights overwritten on
+the device in 1.19 s (plain TorchNeuron process, no server; `patches/PR_DRAFT_inplace_weight_update.md`). It is not a
+measurement of this kernel.
+
+Baselines that go into every table: full-checkpoint in-place update 4.7-6.2 s at 8B (0.34-0.41 s at 0.6B); host-merge
+adapter 13.9 s at 8B (0.67 s at 0.6B); the eager torch device merge already in the patch (about 0.13 s at 0.6B TP4, PR draft;
+not measured at 8B); the lazy host delta (`_LowRankSlice`, CPU-tested only).
+
+### Hardware steps and stop rules
+
+Each step needs the owner's go-ahead before launch. The H1 script is `tests/rlkit/hw_merge_kernel_bench.py` on branch `feat/lora-merge-kernel` (written, not yet run on
+hardware). `50_adapter_server_test.py` (H2, H3) is an experiment script of the public repo
+https://github.com/pengchenglu1997/trainium-sglang-rl, not of this fork.
+
+| Step | Script | Question | Stop rule |
+|---|---|---|---|
+| H1 | `tests/rlkit/hw_merge_kernel_bench.py`, one core | Can the kernel be called on device tensors outside a serving graph (eager, or a small compiled helper)? Time per 8B shard; read back against the reference; integer factors bit-exact; time of the eager torch device merge and of the host merge at the same shapes | exit code 3 means it cannot be called: stop the kernel part and report the torch-device and host numbers only |
+| H2 | `50_adapter_server_test.py`, 0.6B TP4, kernel mode, starting with `RLKIT_KERNEL_CHECK=all` | Swap time split (factors, upload, kernels, copy, sync); adapter 1, 2, 1 identical; zero adapter equals base | any check fails: kernel mode stays off |
+| H3 | same test at 8B TP4 | The headline number; device memory after the base copy; KV pool size | swap above 1.5 s: try one launch per kind over stacked layers, then report what was measured |
+| H4 | restart on the kernel-merged checkpoint | Logprob difference against the swapped server | not 0.0: the difference stays unexplained and is reported so |
+| H5 | compile-cache keys and decode step time before and after a swap | Zero forward overhead | none |
+
+H4 tests one explanation of the eager-merge difference above: a restart on the checkpoint the kernel itself wrote must give
+0.0. If it does, the earlier difference is the few-entry rounding difference between two merge arithmetics, not a fault
+of in-place writing.
+
+### What a write-up may and may not say
+
+May: swap time before and after at 8B with all baselines in one table; no change to the serving graphs; identical
+weights when the same adapter returns; the shard-space layout (K on the partition axis of both operands, no transpose on
+the device, block-diagonal fused segments); the memory cost of the base copies.
+
+May not: credit the kernel with the whole drop from 13.9 s (most of it comes from not forming full matrices on the
+host); call it the first LoRA on Trainium (NxD Inference serves multi-LoRA with torch ops); claim hardware correctness
+from simulator runs.
+
+## 2. Sampler kernel (designed, not built)
+
+### What it would replace
+
+In `SGLANG_NEURON_SAMPLER=temperature` mode with no top-logprobs, the shard-local stage of the engine's sampler
+(`sampling.py`): the per-column hash noise, the Gumbel score, the per-shard maximum, the winner id, the raw logit at the
+winner, and the log-sum-exp. A one-pass kernel per rank would do this over the rank's 37,984 vocabulary columns (151,936
+divided by 4; Qwen3-0.6B and 8B have the same shard width at TP4). The all-gather and the global merge stay the
+engine's code. `topk_topp`, greedy-only mode and top-logprobs above zero would keep the torch path.
+
+### Measured basis
+
+| Quantity | Value | Condition | Source |
+|---|---|---|---|
+| speed, `temperature` mode | 2,183-2,218 tok/s | Qwen3-0.6B TP4, 256 requests of up to 256 tokens, 32 in flight, three passes, one server | `NIGHT_RECORD` section 3 |
+| speed, `topk_topp` mode, full vocabulary | 2,713-2,730 tok/s | same | same |
+| sampler subtree of the decode step | 2.62 ms of 26.0 ms instruction time per step (10.1 %) | device profile of rank 0, 4 decode steps, `temperature` mode with no top logprobs (so, by the code, a decode compiled at `-O2`). Instruction time is summed over engines; it is not wall time (the step is 9.2-9.3 ms) | our analysis notes (not published); the join script was not saved |
+
+Which mode the RL loop used: the launcher `srv_sglang_neuron.sh` defaults to `temperature`, and
+`scripts/run_trn2_seeds.sh` sets neither `SGL_SAMPLER` nor `SGL_TOP_LOGPROBS`, so by the scripts the 0.6B loop ran
+`temperature` with top logprobs 0. This was not read back from the run's own server log. If the loop ran greedy, this
+kernel does not touch the loop.
+
+### The compile-flag question (corrected on review)
+
+In `models/host.py` (`neuron_compiler_args`, same code on upstream `main` and in our patch), the decode graph is
+compiled at `-O2`, without the modular-flow threshold, except when it traces the device top-k: when
+`SGLANG_NEURON_MAX_TOP_LOGPROBS` is above 0, or the mode is `topk_topp`. Then it keeps the default arguments (`-O1` plus
+the threshold, by our reading of the code). The code comment says `-O2` miscompiles that top-k.
+
+An earlier version of this file said the probe compared `temperature` at `-O2` with `topk_topp` at the default. That is
+not what the scripts did. `58_sampler_probe.py` starts every server with `SGL_TOP_LOGPROBS=20` (its default), so by the
+code both probe servers kept the default arguments, and the 20 % gap was measured between two programs compiled with the
+same flags, both with the top-logprob path on. Not read back from the server logs.
+
+What follows:
+
+- The probe gap (2,183-2,218 against 2,713-2,730 tok/s) is not explained by the `-O2` flag, as far as the code shows.
+- The configuration the RL loop runs and the kernel would replace (`temperature`, top logprobs 0, decode at `-O2`) has
+  no measured speed. The 2.62 ms profile figure comes from that configuration; the throughput gap does not.
+- The two numbers may still agree by coincidence: one is a wall-time gap, the other is instruction time summed over
+  engines.
+
+### Step 0, before any kernel work
+
+Rerun `58_sampler_probe.py` for three passes on Qwen3-0.6B TP4 with three servers: `topk_topp` (top logprobs 20, as
+before), `temperature` with `--top-logprobs 0` (the loop's configuration, `-O2`), and `temperature` with top logprobs 0
+and the default flags (a one-line change in our patched `host.py`; there is no environment override). Read the compiler
+arguments back from each server log.
+
+- If `temperature` at top logprobs 0 already reaches 2,600 tok/s or more at either flag setting, the probe gap came from
+  the top-logprob path or the flags, not from the sampler operations. Report that as the finding and build the kernel
+  only if a device profile of that configuration still shows the sampler scope at 1.0 ms or more per step.
+- If it stays near 2,200 tok/s, go on to the kernel.
+- These thresholds are proposed, not measured; they come from our analysis notes (not published).
+
+### Bound of the gain
+
+At most 1.09x of the 0.6B RL iteration if the kernel closes the gap, 1.14x as a hard ceiling (our calculation in
+our analysis notes, not published; basis not re-derived here). Qwen3-0.6B only. The 8B figure
+is unmeasured because no 8B loop has run. The kernel is therefore a small gain on its own; its value is also the
+engineering evidence (G3), if step 0 does not remove the reason.
+
+### Design in short, and acceptance (targets, not results)
+
+- Per rank, per decode step, input logits `[B, 37984]` bf16, B in 1 to 32; a per-rank hash table of the columns built
+  once at load time (152 KB); the hash and noise exactly as the engine's oracle code computes them.
+- Rows are spread over the 128 partitions in segments; columns are walked in tiles of 2,048; a running maximum with the
+  engine's tie rule (smallest global id) and a running log-sum-exp are merged across tiles and segments.
+- Proof on CPU: the kernel is checked bit for bit against a copy of the engine's own oracle in the simulator, with
+  ties, greedy rows, non-finite rows, every batch size, and five planted faults that the tests must catch.
+- Hardware acceptance, fixed in advance and estimates where stated: at least 2,600 tok/s on the same sampler harness
+  (this closes at least 80 % of the 2,200 to 2,720 gap; estimate); sampler-scope instruction time at most 0.5 ms
+  against 2.62 ms; sampled tokens equal to the engine's `temperature` path on at least 99.9 % of 255 steps x 32 rows
+  replayed from identical logits; trainer-vs-server logprob difference no worse than the measured values (mean absolute
+  difference 0.015 before and 0.017 after an adapter update, Qwen3-0.6B; PR draft in the public repo). All of these are
+  proposed targets.
+- Open technical risks, unverified: whether NKI int32 multiplication wraps exactly modulo 2^32 (the main risk; a
+  12-bit limb fallback is designed); whether the simulator's `ln` equals `torch.log` in fp32; how `wrap_nki` passes
+  per-rank constants into a traced decode graph. Hardware is needed for the first and third.
+
+## 3. Directions examined and not taken
+
+### Live-length decode attention
+
+Idea: make the decode attention read only the live part of the paged KV cache, so a step does not pay for the compiled
+context.
+
+Not taken now:
+
+- The measured slope is real: with one live row the step is 9.3 / 13.7 / 25.2 ms at compiled context 1024 / 4096 / 8192
+  (`NIGHT_RECORD` section 6). But the design's central saving (fewer HBM bytes for dead blocks) is probably already
+  in the library kernel. The source of the library's decode attention (nkilib `attention_tkg.py` on its main branch,
+  read second-hand through a web summary; the version in SDK 2.33 was not opened) skips out-of-range block entries in
+  its indirect loads. What remains is compute and instruction issue over dead tiles, which nobody measured. The cause of
+  the context slope is therefore unexplained, not excluded.
+- At the RL loop's context of 1024 the bound is about 1.04x of the iteration, by the design's own arithmetic.
+- The context ladder (short rows run a smaller-context graph) is expected to remove much of the long-context cost with
+  no kernel. That is an estimate; the measurement with the ladder on (`docs/experiment-plan-2026-11-22.md`, W1.2) has
+  not been run.
+- Swapping only the attention core out of the fused attention block loses its fused QKV, RoPE and output projection.
+- An upstream author is working on early exit in attention (upstream PRs 4 and 8).
+
+Revisit only if a no-kernel device profile at compiled context 1024 and 8192 (ladder off) shows a large cost per dead
+tile, and long-context rollouts become the workload. That profile can be taken in the same session as sampler step 0.
+
+### Device-side full-checkpoint shard rebuild
+
+Idea: build the per-rank shards on the device for a full-checkpoint update, instead of in host loaders.
+
+Not taken:
+
+- Its share of any RL loop we run is zero: all of them use the adapter path.
+- The loader time (3.6-4.7 s per rank at 8B) was never broken down, so it is not known that data movement is the cost.
+- Upstream PR 20 reports a full in-place reload of about 1.9 s on Qwen3-4B TP4 on a trn3.48xlarge, a host path (different
+  model and machine). If that holds at 8B, a host fix would beat a kernel.
+- The kernel would be pure data movement with no arithmetic, so it has little kernel content.
+
+First step if anyone picks this up: a host profile of one loader run.
+
+## 4. Candidates from other platforms (candidate, not measured)
+
+None of these has been tried against our code. Each line says where the idea comes from and what the first check is.
+
+| Candidate | Source of the idea | What would be checked | Status |
+|---|---|---|---|
+| Separate fetch tile and compute tile in the decode attention (tune the DMA tile and the SBUF compute tile independently) | The vLLM TPU write-up for small-dense-model RL (vllm.ai/blog/2026-11-12-rl-small-dense-tpu-v7) reports that decoupling HBM fetch geometry from VMEM compute tiling in its attention kernel raised decode throughput by 48 % at TP4 (64,929 to 96,273 tok/s; page opened 2026-11-23). This is a TPU number reported by the source, not reproduced, and does not transfer as a number. | Whether the library decode kernel's fetch and compute tile sizes can be set separately, and what the K-cache load path costs. Every server log of ours warns that `chunk_num_blocks=4 is not a multiple of 16` and falls back to per-block copy plus transpose for the K cache. The link between that warning and the profile (transposes are 49 % of hardware flops) is not traced | candidate, not measured |
+| Batch small tiles per DMA | AWS Neuron DMA guidance as read in the NKI DMA bandwidth guide and the AWS agent skill pack: about 2 KiB or more contiguous per partition is the recommended minimum and 4 KiB or more saturates; many small DMAs to adjacent addresses are slower than one large one | Our merge kernel moves 128 x 512 bf16 tiles, which is 1 KiB per partition. That is below the 4 KiB guidance, although the whole tile is 128 KiB. Batching four OUT tiles per `dma_copy` would reach 4 KiB. Check on hardware with a device profile of the merge kernel. The same check applies to the KV reads (head dim 128 in bf16 is 256 B per row of one head) | candidate, not measured |
+| Multi-step decode in one compiled loop | The same vLLM TPU write-up moves many decode iterations into one compiled device loop. On Neuron the upstream repository has a whole-model multi-step decode kernel for Qwen3.5 (`qwen35_hybrid_multistep`), but it is greedy argmax only and refuses sampling and logprobs, which RL needs. Dense Qwen3 does not use it | Whether `neuronx-cc` can compile a multi-token decode loop with sampling and logprobs. Our profile shows the device runs back to back (gaps of 6-9 µs between executions), so the gain at 0.6B would not come from removing host gaps | candidate, not measured |
+
+## 5. Where the time goes today
+
+All rows: Qwen3-0.6B, TP4, four logical cores, context 1024, one decode bucket of 32 unless stated, one run each.
+Profile of a rollout pass of 32 requests of up to 256 tokens. Nothing here is Qwen3-8B.
+
+| Quantity | Value | Condition | Source |
+|---|---|---|---|
+| Decode step, device execution | median 9.13 ms (system profile); 9.2-9.3 ms (device profile) | system profile: 287 executions per core in a 2.66 s window, two of four ranks read; device profile: 4 executions, rank 0 | `NIGHT_RECORD` section 5 |
+| Executions as share of the window | 2,653 ms of a 2,658 ms span per core | same system profile | same |
+| Gap between executions | median 6-9 µs, about 5 ms in total | same | same |
+| Collective barrier waits | 9.8 ms in total over the window; collective active time 0.66 ms per step | system profile; device profile (2.65 ms over 4 steps) | `NIGHT_RECORD` section 5; our analysis notes (not published) |
+| Wall time per step at 32 live rows | 10.4 ms | one bucket, context 1024 | `NIGHT_RECORD` section 6 (A) |
+| Fused attention call, share of instruction time | 18.10 ms of 26.02 ms per step (69.7 %); 28 layers, about 0.65 ms per layer | device profile, instruction durations summed over engines, joined to HLO scopes. Not wall time | our analysis notes (not published); the join script was not saved |
+| Other scopes, instruction time per step | sampler 2.62 ms (10.1 %); MLP 1.70 ms (6.5 %); lm_head 0.52 ms (2.0 %); RMSNorm 0.52 ms (2.0 %); not attributed 2.45 ms (9.4 %) | same | same |
+| Engine active time per step (4 executions divided by 4) | DMA 5.4 ms; GpSimd 3.5; scalar 3.3; sync 2.9; vector 2.6; tensor (matmul) 2.2 | device profile; engines overlap, so these do not add up to the step | `NIGHT_RECORD` section 5 (totals 21.7 / 14.0 / 13.2 / 11.7 / 10.4 / 8.9 ms over 4 executions, 39.5 ms) |
+| DMA share | 21.7 ms of the 39.5 ms window, by plain division 55 % | as above. Our analysis notes (not published) write "21.7 % of window"; the two do not agree and the denominator is not settled. The profiler also warns that dynamic DMA values may be inaccurate | `NIGHT_RECORD` section 5; our analysis notes (not published) |
+| Matmul work | transposes 45.2e9 of 92.3e9 hardware flops (49 % by division); matmul engine is the least busy of the six queues | device profile, 4 steps | `NIGHT_RECORD` section 5; our analysis notes (not published) |
+| Step against compiled context, 32 live rows | 10.4 / 14.8 / 26.5 ms at 1024 / 4096 / 8192 | one bucket, context ladder off | `NIGHT_RECORD` section 6 (A, C, D) |
+| Step against compiled context, 1 live row | 9.3 / 13.7 / 25.2-25.4 ms at 1024 / 4096 / 8192 | same | same |
+| Step with default buckets, 1 live row | 4.6 ms (215 tok/s) against 9.3 ms (108 tok/s) with one bucket | context 1024 | `NIGHT_RECORD` section 6 (B, A) |
+| Row fill of one group of 32 answers | 0.58-0.63 | same short GSM8K requests | `NIGHT_RECORD` section 6 |
+
+Reading, with limits:
+
+- The device runs back to back, and half of the matmul flops are transposes. The fused attention call holds about 70 %
+  of instruction time. These facts point at the decode attention path, but instruction time is not wall time, and the
+  wall share of that call is unknown.
+- The context slope (+4.4 ms from 1024 to 4096, +11.7 ms from 4096 to 8192 at 32 rows, by subtraction of the table)
+  has no explanation yet.
+- Per-operation attribution needs the raw profile files. They are not in this fork or the public repo (size); the record gives their
+  checksums.
+- One run each, one model size, one tensor-parallel layout. None of this is a statement about 8B or about 27-32B.
