@@ -97,11 +97,11 @@ Decision:
 - PR 20 is the base for full-checkpoint sync. **Our staged-CPU-graph full-reload path is retired, not merged.**
 - What upstream does not cover, and we keep:
   - The LoRA adapter route: `adapter_config.json` in the folder, host base copies, a pre-write coverage check, refusal of rslora and dora, and the lazy low-rank slice.
-  - Our extra checks: dtype, every live parameter refreshed, buffer coverage log, and `drain_launches` before the write.
+  - Two steps of our hook that PR 20 does not have: `drain_launches` before the first write and `torch_neuronx.synchronize()` after the last. We never ran without them, so we do not know whether they are needed. Our patch also logs how many live parameters and buffers an update covered.
   - The LoRA shard-merge NKI kernel (simulator only).
   - The `RLKIT_DECODE_LADDER` switch in `models/qwen3/sglang_model.py`, a separate small item.
 - PR 21 (delta pull) is a tracked branch on top of PR 20. It needs a trainer that publishes the `weight_v{N:06d}` format, and ours does not.
-- PR 20 does not check dtype, does not check that every live parameter was refreshed, and does not call `drain_launches`. It does reject unknown tensors and shape mismatches before the first `copy_`.
+- PR 20 rejects unknown tensors and shape mismatches before the first `copy_`, and its checkpoint loader raises when a mapped key is missing. We have not run PR 20, so this document makes no claim about what it lacks.
 
 Plan for the fork, in order:
 
@@ -111,7 +111,7 @@ Plan for the fork, in order:
 4. The unchanged heads of upstream PRs 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16, 17, 18, 20 and 21 are branches `upstream-pr/<N>`. The experiment scripts, launchers and session records stay in https://github.com/pengchenglu1997/trainium-sglang-rl .
 5. Later, as named tasks in our roadmap (not public) and not done blind:
    - `feat/adapter-sync-on-pr20`: the hook becomes a thin wrapper. If `adapter_config.json` is present, call our adapter function. Otherwise fall through to PR 20's reload. The adapter function uses the live first graph's `hf_weight_mappings()` and the loaders PR 20 keeps, instead of `build_graph`. Base copies are cleared on every full reload. Check that the kept loaders accept `_LowRankSlice`. Done only with the Qwen3-0.6B and Qwen3-8B adapter re-tests (adapter 1, 2, 1, zero adapter, each equal to a fresh start on the host-merged checkpoint).
-   - A small upstream follow-up to PR 20 with the dtype and every-parameter-refreshed checks and a CPU-mode test. `drain_launches` is proposed only if an async-execution test shows it is needed.
+   - Run PR 20's own branch on trn2 (in place against a fresh start, 100 updates in a row, updates under load) and post the results on PR 20. What we send upstream is what ran on hardware.
    - Propose the adapter route upstream as a separate PR once the re-base passes, linked from issue 15.
    - Port the kernel into the adapter write path only after a hardware run of the kernel.
    - A `reload_weights` path for PR 6 (it has a host `load_weights` and a module-level `hf_weight_mappings(graph)` but no `reload_weights`) and the `k_eq_v` check for PR 2, only if the 27 to 32B rung needs them.
