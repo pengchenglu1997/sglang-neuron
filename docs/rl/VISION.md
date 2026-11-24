@@ -99,7 +99,7 @@ Where things stand (read 2026-11-23):
 
 What we do:
 
-- Test PR 20 and PR 21 on trn2 against our checks (equality with a fresh start, 100 updates in a row, updates under load) and post the results there. This needs hardware and a yes from the researcher before anything is posted.
+- Test PR 20 and PR 21 on trn2 against our checks (equality with a fresh start, 100 updates in a row, updates under load) and post the results there. This needs hardware and a yes from the owner before anything is posted.
 - Once PR 20 lands, rebase the adapter path on it, and send the adapter path as a second PR. Kernel PR only after hardware tests pass.
 - This fork carries upstream PRs usable for our goals, one branch per change (`upstream-pr/<N>`, unchanged upstream heads; branch `integration` merges PRs 20, 4, 9, 16, 17, 18), so the fork can run them before they merge. None of them has been run by us. When upstream merges one, the fork drops its copy. Branch layout: [ROADMAP.md](ROADMAP.md), task N1.
 - Nothing is posted anywhere without an explicit yes.
@@ -151,14 +151,14 @@ The measurement rules in detail are in [METHOD.md](METHOD.md).
 
 ## 7. Open points
 
-- **PR count.** The task text said 21 open pull requests. Read with `gh`, numbers 1 to 21 contain 20 pull requests and 1 issue (15). All 20 are open, none merged.
+- **PR count.** Upstream numbers 1 to 21 are 20 pull requests and 1 issue (15), read with `gh` on 2026-11-23. All 20 are open, none merged.
 - **One chip per TP4 server?** The loop uses 8 TP4 replicas on 32 logical cores. We did not confirm that one TP4 server is one chip. K5 needs it.
 - **Which sampler the loop ran.** By the launch scripts, `temperature` with no top logprobs (decode at -O2 by the code). Not read back from the loop's server logs, which are not in the public repo. The sampler probe ran a different configuration (top logprobs 20).
 - **The 2.62 ms and 26.0 ms profile figures** come from a join of device-profile instructions to compiler operations done by our analysis. The raw profiles are not in the public repo. The instruction time is summed across engines and may not lie on the critical path.
 - **GPU row details.** "One RTX PRO 6000" is from the experiment plan. The GPU price and the AMD and TPU rows are not collected.
 - **Trainium3 numbers** in PR 20 are from a different chip. They show the route works there. They say nothing about Trainium2 speed.
 - **27-32B choice and the trainer route** are not settled (G1).
-- **Hardware access.** Every hardware step needs a machine. Access is not in place yet, and each launch needs the researcher's yes.
+- **Hardware access.** Every hardware step needs a machine. Access is not in place yet, and each launch needs the owner's yes.
 - **Paths.** Experiment scripts and records are named as in the public repo, not in this fork. Code paths are those of the fork branches.
 
 ## 8. Sources

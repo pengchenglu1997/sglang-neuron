@@ -27,7 +27,7 @@ Each task has: **id**, **goal**, **what to do**, **deliverable**, **done when**,
 
 Rules for every task: write the four lines from METHOD.md section 1 (question, expected result with basis, decision either way, machine-time limit) in the task or its pull request before a hardware run. Stop rules are written in advance. A number is reported with its script, commit and result file, or marked unverified.
 
-Hardware tasks need the researcher's go-ahead before launch. Nothing in this file has been posted or sent anywhere.
+Hardware tasks need the owner's go-ahead before launch. Nothing in this file has been posted or sent anywhere.
 
 ---
 
@@ -179,7 +179,7 @@ Run these on one trn2 instance, in this order, so earlier results can stop later
 - **Goal:** G3
 - **Question:** can the kernel run on a NeuronCore, is it correct, and does it bring the 8B adapter swap from 13.9 s toward 1.5 s?
 - **Expected result:** proposed target at most 1.5 s per swap at 8B (VISION K2). This is an estimate from one measured number (16.4 GB written to the device in 1.19 s), not from the kernel. Most of the drop from 13.9 s may come from not forming full matrices on the host, not from the kernel.
-- **Steps (from KERNELS.md; each needs the researcher's go-ahead):**
+- **Steps (from KERNELS.md; each needs the owner's go-ahead):**
 
 | Step | Check | Stop rule |
 |---|---|---|
@@ -434,7 +434,7 @@ Run these on one trn2 instance, in this order, so earlier results can stop later
 
 ### U1. Comment on PR 20 pointing to issue 15
 - **Goal:** G4
-- **What to do:** a comment on PR 20 that points to our issue 15, reports what B1a measured, and offers the CPU test (N7) and the adapter path. **Needs the researcher's explicit approval before posting.** Post only after B1a has results.
+- **What to do:** a comment on PR 20 that points to our issue 15, reports what B1a measured, and offers the CPU test (N7) and the adapter path. **Needs the owner's explicit approval before posting.** Post only after B1a has results.
 - **Deliverable:** comment text in `docs/rl/upstream/`.
 - **Done when:** text is approved and posted, or held.
 - **Needs hardware:** no
@@ -462,7 +462,7 @@ Run these on one trn2 instance, in this order, so earlier results can stop later
 
 ### U4. Other PRs we could send
 - **Goal:** G4
-- **What to do:** from our own work, candidates are: the one-rank gloo-group test pattern (borrowed from PR 14 with credit) for weight-update tests, the needle grid as a CI check for decode kernels, the restart acceptance table as a template, and a measured trn2 result for any PR in UPSTREAM_PRS.md that we have run (as a data comment, with the command and log). Each goes through the researcher before posting.
+- **What to do:** from our own work, candidates are: the one-rank gloo-group test pattern (borrowed from PR 14 with credit) for weight-update tests, the needle grid as a CI check for decode kernels, the restart acceptance table as a template, and a measured trn2 result for any PR in UPSTREAM_PRS.md that we have run (as a data comment, with the command and log). Each goes through the owner before posting.
 - **Done when:** a list of ready texts exists.
 - **Needs hardware:** no
 - **Depends on:** the tasks that produce the data
