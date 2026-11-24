@@ -61,9 +61,12 @@ ATTN_BACKEND_NAME = "neuron"
 
 _TOKENIZER = "sglang.srt.managers.tokenizer_manager.TokenizerManager"
 _CONTROL = "sglang.srt.managers.tokenizer_control_mixin.TokenizerControlMixin"
+_RUNNER_WEIGHT_UPDATE = ("sglang.srt.model_executor.model_runner_components.weight_updater."
+                         "WeightUpdater.update_weights_from_disk")
 # the model's weights live in its compiled graphs, loaded once
 _WEIGHT_UPDATES = (
-    f"{_TOKENIZER}.update_weights_from_disk",
+    # EXPERIMENT (2026-11-20, not upstream): update_weights_from_disk is let through; the model runner's side of it
+    # is _update_weights_in_place below (ModelHost.update_weights_in_place).
     f"{_CONTROL}.update_weights_from_tensor",
     f"{_CONTROL}.update_weights_from_distributed",
     f"{_CONTROL}.update_weights_from_ipc",
@@ -430,6 +433,9 @@ def _register() -> None:
         finish_swa_frontier.register(HookRegistry, HookType.REPLACE)
     HookRegistry.register("sglang.srt.managers.scheduler.Scheduler.flush_cache", _flush_cache_drained,
                           HookType.AROUND)
+    # EXPERIMENT (2026-11-20, not upstream): in-place weight update. A change proposed upstream would pin the
+    # replaced function in _RUNTIME_SOURCES_MD5 like the others; the md5 is logged at the first update instead.
+    HookRegistry.register(_RUNNER_WEIGHT_UPDATE, _update_weights_in_place, HookType.AROUND)
     from sglang_neuron.managers.logprob_errors import finish_prefill_aborts
 
     HookRegistry.register(
@@ -884,6 +890,39 @@ def _preempt_only_for_an_admitted_request(original_fn, self, req, *args, **kwarg
     if self.can_run_list or getattr(self, "carries_chunked_req", False):
         return False
     return original_fn(self, req, *args, **kwargs)
+
+
+def _update_weights_in_place(original_fn, self, model_path, load_format=None, *args, **kwargs):
+    """AROUND WeightUpdater.update_weights_from_disk (EXPERIMENT 2026-11-20, not upstream): the weights of
+    ``model_path`` (a checkpoint of the served model, or a LoRA adapter folder for it) are written into the tensors
+    the compiled graphs read, by ModelHost.update_weights_in_place. Upstream's own body would hand the model a weight
+    iterator and re-run load_weights, which a Neuron host refuses.
+
+    SGLang's tokenizer takes its update lock before it sends this, so no request is being admitted; under async
+    execution the last launch can still be queued on the device, so every launch retires first (as in
+    _flush_cache_drained). The scheduler flushes its caches after a successful update, as upstream does."""
+    import time
+
+    from sglang_neuron.model_executor.async_execution import drain_launches
+
+    t0 = time.time()
+    try:
+        from sglang_neuron.sglang_patches import source_guard
+
+        logger.info("[neuron] EXPERIMENT in-place update replaces upstream %s (source md5 %s)",
+                    _RUNNER_WEIGHT_UPDATE, source_guard.source_md5(original_fn))
+    except Exception:  # noqa: BLE001
+        pass
+    drain_launches()
+    t1 = time.time()
+    try:
+        self.get_model().update_weights_in_place(model_path)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("[neuron] EXPERIMENT in-place update from %s failed", model_path)
+        return False, f"Failed to update weights: {type(exc).__name__}: {exc}"
+    logger.info("[neuron] EXPERIMENT in-place update from %s: drain %.3fs, write %.3fs", model_path, t1 - t0,
+                time.time() - t1)
+    return True, "Succeeded to update model weights."
 
 
 def _flush_cache_drained(original_fn, self, *args, **kwargs):

@@ -40,7 +40,9 @@ def qwen3_config(hf_config) -> TransformerConfig:
 
 class Qwen3ForCausalLM(ModelHost):
     name = "Qwen3"
-    decode_context_ladder = True
+    # EXPERIMENT (2026-11-20, not upstream): RLKIT_DECODE_LADDER=0 compiles one decode context (the server's context
+    # length) instead of the ladder of three; a rollout server with a short context has no use for the smaller ones.
+    decode_context_ladder = __import__("os").environ.get("RLKIT_DECODE_LADDER", "1") != "0"
 
     def check_launch(self, config) -> None:
         check_bf16_launch(config, self.name)
