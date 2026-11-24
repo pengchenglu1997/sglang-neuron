@@ -225,6 +225,9 @@ class ModelHost(NeuronModel):
         t0 = time.time()
         with open(os.path.join(path, "adapter_config.json")) as f:
             cfg = json.load(f)
+        odd = [k for k in ("use_rslora", "use_dora", "rank_pattern", "alpha_pattern") if cfg.get(k)]
+        if odd:     # one scale lora_alpha / r for every module is all this sketch computes (2026-11-23)
+            raise NotImplementedError(f"adapter config sets {odd}; only plain LoRA with one r and one lora_alpha")
         scale = float(cfg["lora_alpha"]) / float(cfg["r"])
         raw = load_file(os.path.join(path, "adapter_model.safetensors"))
         a_of, b_of = {}, {}
@@ -245,6 +248,15 @@ class ModelHost(NeuronModel):
         mappings, loaders, base = state["mappings"], state["loaders"], state["base"]
         rank = first.tp_group.rank_in_group
         base_dev = state.setdefault("base_dev", {})
+        # Coverage is checked for every parameter before the first write (2026-11-23): the check used to sit in the
+        # write loop, so an adapter covering only part of a later parameter left the earlier ones rewritten.
+        for name, keys in mappings.items():
+            keys = [keys] if isinstance(keys, str) else list(keys)
+            hit = [k in a_of for k in keys]
+            if any(hit) and not all(hit):
+                raise NotImplementedError(f"adapter covers only part of {name}: {keys}; nothing was written")
+            if any(k in a_of and k not in b_of for k in keys):
+                raise ValueError(f"adapter has lora_A without lora_B for {name}; nothing was written")
 
         def sync():
             try:
@@ -253,16 +265,19 @@ class ModelHost(NeuronModel):
             except Exception:  # noqa: BLE001
                 pass
 
-        def apply(on_device: bool):
+        def apply(on_device: bool, only=None):
             """One pass over the adapted parameters. on_device: B @ A, the loader's cut and the sum with the base
             all run on the NeuronCore (a second copy of the adapted base shards stays on the device); otherwise on
-            the host from the host copy, with one host-to-device write per parameter."""
+            the host from the host copy, with one host-to-device write per parameter. ``only``: a set of parameter
+            names; the others are left alone (the kernel mode's leftovers)."""
             touched, nbytes, t_delta, t_copy = 0, 0, 0.0, 0.0
             diag_rows = []
             fa ={k: v.to(live_device) for k, v in a_of.items()} if on_device else a_of
             fb = {k: v.to(live_device) for k, v in b_of.items()} if on_device else b_of
             with torch.no_grad():
                 for name, keys in mappings.items():
+                    if only is not None and name not in only:
+                        continue
                     keys = [keys] if isinstance(keys, str) else list(keys)
                     hit = [k in a_of for k in keys]
                     if not any(hit) and name not in base:
@@ -271,7 +286,10 @@ class ModelHost(NeuronModel):
                         raise NotImplementedError(f"adapter covers only part of {name}: {keys}")
                     p = live[name]
                     if name not in base:                    # before the first write to this parameter
-                        base[name] = p.detach().float().cpu().clone()
+                        # a parameter the kernel mode wrote earlier holds an adapter already: its base is the
+                        # device copy that mode kept, not the live value
+                        src = base_dev[name] if name in base_dev else p
+                        base[name] = src.detach().float().cpu().clone()
                     if on_device and name not in base_dev:
                         base_dev[name] = base[name].to(p.dtype).to(live_device)
                     t = time.time()
@@ -342,6 +360,43 @@ class ModelHost(NeuronModel):
         # RLKIT_LAZY_DELTA=0 goes back to forming the full B @ A before the loader cuts it (the path of 2026-11-20)
         lazy_delta = os.environ.get("RLKIT_LAZY_DELTA", "1") == "1"
         n_lazy = [0, 0]                                                 # parameters taken lazily, fallen back
+        # RLKIT_DEVICE_WRITE=kernel (2026-11-23, NOT YET RUN ON HARDWARE): only the LoRA factors of this rank's shard
+        # go to the device and the NKI kernel lora_merge writes base + delta from a base copy kept on the device
+        # (models/rlkit_kernel_path.py). Parameters that mode refuses, and the whole update if the kernel call
+        # fails, take the host path below.
+        if write_mode == "kernel":
+            want_device = False
+            if state.get("kernel_ok", True):
+                try:
+                    from sglang_neuron.models import rlkit_kernel_path
+                    rep = rlkit_kernel_path.apply_adapter(live=live, mappings=mappings, loaders=loaders, a_of=a_of,
+                                                          b_of=b_of, scale=scale, rank=rank, state=state, sync=sync)
+                except Exception as e:  # noqa: BLE001  (coverage was checked above, so any error is the kernel path's)
+                    logger.warning("[neuron] EXPERIMENT adapter update by the kernel failed (%s: %s); from the host "
+                                   "from now on", type(e).__name__, str(e)[:300])
+                    state["kernel_ok"] = False
+                else:
+                    t_h = time.time()
+                    left = set(rep["host"])
+                    h_touched, h_bytes, h_delta, h_copy = apply(False, only=left) if left else (0, 0, 0.0, 0.0)
+                    logger.info("[neuron] EXPERIMENT adapter update from %s by the kernel (%s call, %s factors): "
+                                "adapter %d bytes, %d live tensors by the kernel, %d put back to the base on the "
+                                "device, %d on the host (%d bytes in all; refused %s); layout probe %.2fs, factors "
+                                "%.2fs, upload %.2fs, kernel %.2fs, copy %.2fs, read-back check %.2fs %s, host part "
+                                "%.2fs, total %.2fs; base copies kept on the device " + f"{rep['base_dev_bytes']} bytes",
+                                path, rep["how"], rep["mode"],
+                                sum(t.numel() * t.element_size() for t in raw.values()), rep["kernel"],
+                                rep["restored"], h_touched, rep["bytes"] + h_bytes, rep["refused"], rep["t_probe"],
+                                rep["t_factors"], rep["t_upload"], rep["t_kernel"], rep["t_copy"], rep["t_check"],
+                                [(n, round(s, 6), round(w, 6)) for n, s, w in rep["check"][:2]],
+                                time.time() - t_h, time.time() - t0)
+                    return
+            # the kernel mode is off for this server: a parameter it wrote holds an adapter, so the host path must
+            # start from the device copy of its base (apply() takes it from base_dev), which is then dropped
+            for name in list(base_dev):
+                if name not in base:
+                    base[name] = base_dev[name].detach().float().cpu().clone()
+            base_dev.clear()
         if want_device and state.get("on_device", True):
             try:
                 with torch.no_grad():
