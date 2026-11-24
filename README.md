@@ -7,9 +7,10 @@
 > **Sent upstream**
 > - Issue [#15](https://github.com/sgl-project/sglang-neuron/issues/15): in-place weight updates for RL rollout servers,
 >   with measurements. Upstream PR 20 now implements the full-checkpoint part.
-> - Pull request [#22](https://github.com/sgl-project/sglang-neuron/pull/22) (branch `fix/compile-cache-stamp-race`):
->   two servers that start together on one empty compile cache can stop at start-up; a four-line fix with a CPU
->   reproduction.
+> - Draft pull request [#22](https://github.com/sgl-project/sglang-neuron/pull/22) (branch
+>   `fix/compile-cache-stamp-race`): two servers that start together on one empty compile cache can stop at start-up.
+>   The failure was seen on trn2; the four-line fix has a CPU reproduction only and stays a draft until it has run on
+>   the machine.
 >
 > **Measured** (trn2.48xlarge, Neuron SDK 2.33, v0.1.0 image, TP4, one run each; sources in
 > [RESULTS.md](docs/rl/RESULTS.md) and issue #15)
@@ -28,7 +29,7 @@
 > | Branch | What it holds | Tested how |
 > |---|---|---|
 > | `main` | upstream v0.1.0 plus [`docs/rl/`](docs/rl/). No code change | - |
-> | `fix/compile-cache-stamp-race` | the start-up fix above, on upstream `main` | CPU reproduction |
+> | `fix/compile-cache-stamp-race` | the start-up fix above, on upstream `main` | CPU reproduction only; not run on hardware |
 > | `feat/inplace-adapter-sync` | in-place weight update and LoRA adapter sync | trn2, Qwen3-0.6B and 8B; the per-shard delta on CPU only |
 > | `feat/lora-merge-kernel` | LoRA shard-merge NKI kernel, off by default, with CPU tests in `tests/rlkit/` ([notes](docs/rl/KERNELS.md)) | NKI 0.7.0 CPU simulator only |
 > | `integration` | `main` plus upstream PRs 20, 4, 9, 16, 17, 18 ([decisions and reasons](docs/rl/UPSTREAM_PRS.md)) | compiles; not run by us on hardware |
