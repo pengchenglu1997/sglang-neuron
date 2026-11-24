@@ -4,7 +4,7 @@ Upstream is sgl-project/sglang-neuron. Its `main` is one squashed commit (4e2432
 
 ## Rules for reading this file
 
-- Every number in the "Author reports" column is the author's own, copied from the PR text. **We have not run any of them.** The column "Run by us" is "no" for every row until a hardware task in [ROADMAP.md](ROADMAP.md) writes a result next to it.
+- Every number in the "Author reports" column is the author's own, copied from the PR text. **We have not run any of them.** The column "Run by us" is "no" for every row until a hardware task in [ROADMAP.md](https://github.com/pengchenglu1997/trainium-sglang-rl/blob/main/docs/plan/ROADMAP.md) writes a result next to it.
 - The authors ran on different hardware. Many ran on trn3. We use trn2, so a trn3 result does not tell us the result on trn2. The column says which one the author used.
 - Decisions:
   - **integrated**: merged into our branch `integration`, in the order given below.
@@ -109,7 +109,7 @@ Plan for the fork, in order:
 2. Our patch is branch `feat/inplace-adapter-sync` on top of v0.1.0. It is not on `integration`, because it and PR 20 hook the same function (see above).
 3. The LoRA merge kernel is on its own branch `feat/lora-merge-kernel`, on top of `feat/inplace-adapter-sync`, marked "NKI 0.7.0 CPU simulator only, not run on hardware". Its CPU tests are in `tests/rlkit/` (`bash tests/rlkit/run_all.sh`).
 4. The unchanged heads of upstream PRs 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16, 17, 18, 20 and 21 are branches `upstream-pr/<N>`. The experiment scripts, launchers and session records stay in https://github.com/pengchenglu1997/trainium-sglang-rl .
-5. Later, as named tasks in ROADMAP.md and not done blind:
+5. Later, as named tasks in [ROADMAP.md](https://github.com/pengchenglu1997/trainium-sglang-rl/blob/main/docs/plan/ROADMAP.md) and not done blind:
    - `feat/adapter-sync-on-pr20`: the hook becomes a thin wrapper. If `adapter_config.json` is present, call our adapter function. Otherwise fall through to PR 20's reload. The adapter function uses the live first graph's `hf_weight_mappings()` and the loaders PR 20 keeps, instead of `build_graph`. Base copies are cleared on every full reload. Check that the kept loaders accept `_LowRankSlice`. Done only with the Qwen3-0.6B and Qwen3-8B adapter re-tests (adapter 1, 2, 1, zero adapter, each equal to a fresh start on the host-merged checkpoint).
    - A small upstream follow-up to PR 20 with the dtype and every-parameter-refreshed checks and a CPU-mode test. `drain_launches` is proposed only if an async-execution test shows it is needed.
    - Propose the adapter route upstream as a separate PR once the re-base passes, linked from issue 15.

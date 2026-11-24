@@ -1,21 +1,39 @@
 # sglang-neuron
 
-> **About this fork.** This is a working fork of [sgl-project/sglang-neuron](https://github.com/sgl-project/sglang-neuron)
-> for reinforcement-learning post-training on AWS Trainium2: a rollout server that takes new weights and LoRA adapters
-> in place, on larger models, with kernel-level optimisations that are measured before they are claimed.
+> **About this fork.** A working fork of [sgl-project/sglang-neuron](https://github.com/sgl-project/sglang-neuron) for
+> reinforcement-learning post-training on AWS Trainium2: a rollout server that takes new weights and LoRA adapters in
+> place, without a restart and without recompiling the serving graphs.
+>
+> **Sent upstream**
+> - Issue [#15](https://github.com/sgl-project/sglang-neuron/issues/15): in-place weight updates for RL rollout servers,
+>   with measurements. Upstream PR 20 now implements the full-checkpoint part.
+> - Branch `fix/compile-cache-stamp-race`: two servers that start together on one empty compile cache can stop at
+>   start-up; a four-line fix with a CPU reproduction. Pull request not opened yet.
+>
+> **Measured** (trn2.48xlarge, Neuron SDK 2.33, v0.1.0 image, TP4, one run each; sources in
+> [RESULTS.md](docs/rl/RESULTS.md) and issue #15)
+>
+> | What | Result |
+> |---|---|
+> | New weights on Qwen3-0.6B: restart, against an in-place update | 455-460 s, against 0.34-0.41 s |
+> | In place against a fresh start on the same checkpoint | same text, token logprobs identical: Qwen3-0.6B, Qwen3-8B, GLM-4-9B-0414, DeepSeek-V2-Lite |
+> | Qwen3-8B: full update; LoRA adapter update (host merge) | 4.7-6.2 s; 13.9-14.0 s |
+> | Qwen3-0.6B: LoRA adapter update | 0.67-0.70 s |
+> | RL loop on Qwen3-0.6B, 150 steps, 3 seeds | 5.31-5.33 s a step (median); greedy accuracy on 500 GSM8K questions 0.572-0.574 before, 0.702-0.728 after |
+> | LoRA shard-merge NKI kernel | CPU simulator only. Not run on hardware |
+>
+> **Branches**
 >
 > | Branch | What it holds | Tested how |
 > |---|---|---|
-> | `main` | upstream v0.1.0 plus the documents in [`docs/rl/`](docs/rl/). No code change. | - |
-> | `integration` | `main` plus upstream PRs 20, 4, 9, 16, 17, 18 ([decisions and reasons](docs/rl/UPSTREAM_PRS.md)) | compiles; **not run by us on hardware** |
-> | `feat/inplace-adapter-sync` | in-place weight update and LoRA adapter sync for RL rollout servers | trn2, Qwen3-0.6B and 8B; the lazy delta on CPU only |
-> | `feat/lora-merge-kernel` | LoRA shard-merge NKI kernel, off by default, with CPU tests in `tests/rlkit/` | NKI 0.7.0 CPU simulator only; **not run on hardware** |
+> | `main` | upstream v0.1.0 plus [`docs/rl/`](docs/rl/). No code change | - |
+> | `fix/compile-cache-stamp-race` | the start-up fix above, on upstream `main` | CPU reproduction |
+> | `feat/inplace-adapter-sync` | in-place weight update and LoRA adapter sync | trn2, Qwen3-0.6B and 8B; the per-shard delta on CPU only |
+> | `feat/lora-merge-kernel` | LoRA shard-merge NKI kernel, off by default, with CPU tests in `tests/rlkit/` ([notes](docs/rl/KERNELS.md)) | NKI 0.7.0 CPU simulator only |
+> | `integration` | `main` plus upstream PRs 20, 4, 9, 16, 17, 18 ([decisions and reasons](docs/rl/UPSTREAM_PRS.md)) | compiles; not run by us on hardware |
 > | `upstream-pr/<N>` | unchanged heads of the upstream PRs we carry or track | by their authors |
 >
-> Start with [VISION.md](docs/rl/VISION.md) (goals and KPIs) and [ROADMAP.md](docs/rl/ROADMAP.md) (tasks). Then:
-> [LANDSCAPE.md](docs/rl/LANDSCAPE.md) (what exists that we build on), [METHOD.md](docs/rl/METHOD.md) (how results are
-> measured and accepted), [KERNELS.md](docs/rl/KERNELS.md), [RESULTS.md](docs/rl/RESULTS.md).
-> Experiment scripts and session records are in
+> Experiment scripts, session records and planning documents are in
 > [pengchenglu1997/trainium-sglang-rl](https://github.com/pengchenglu1997/trainium-sglang-rl).
 >
 > Everything below this box is the upstream README.
