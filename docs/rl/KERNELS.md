@@ -12,8 +12,8 @@ Read this first:
 - Measured results that do not involve a kernel are in [RESULTS.md](RESULTS.md).
 
 Where this fits. Goal G3 is one or two NKI kernel optimisations with before/after numbers. The merge kernel serves the
-adapter update of the RL loop (section 1). The sampler kernel is the second candidate (section 2). Sections 3 and 4
-record what was looked at and not taken, so nobody repeats the search.
+adapter update of the RL loop (section 1). The sampler kernel was the second candidate, but it is not scheduled (section 2); the second kernel is
+chosen from a device profile. Sections 3 and 4 record what was looked at and not taken, so nobody repeats the search.
 
 ## 1. LoRA shard-merge kernel
 
@@ -147,7 +147,7 @@ May not: credit the kernel with the whole drop from 13.9 s (most of it comes fro
 host); call it the first LoRA on Trainium (NxD Inference serves multi-LoRA with torch ops); claim hardware correctness
 from simulator runs.
 
-## 2. Sampler kernel (designed, not built)
+## 2. Sampler kernel (designed, not built, not scheduled)
 
 ### What it would replace
 
@@ -156,6 +156,18 @@ In `SGLANG_NEURON_SAMPLER=temperature` mode with no top-logprobs, the shard-loca
 winner, and the log-sum-exp. A one-pass kernel per rank would do this over the rank's 37,984 vocabulary columns (151,936
 divided by 4; Qwen3-0.6B and 8B have the same shard width at TP4). The all-gather and the global merge stay the
 engine's code. `topk_topp`, greedy-only mode and top-logprobs above zero would keep the torch path.
+
+### Relevance to a published RL setting
+
+The published RL rollout setting on another accelerator that states its sampling settings, the vLLM TPU RL write-up of
+2026-11-12 (https://vllm.ai/blog/2026-11-12-rl-small-dense-tpu-v7), samples with top-k and top-p. In `sampling.py` of SGLang-Neuron
+(`origin/main`), `topk_topp` mode is `temperature` plus SGLang's top-k / top-p / min-p filters, applied to a pool of the
+global top 256 tokens per row (`TOP_K_MAX`); `temperature` mode does not apply these filters and rejects such requests at
+admission. On a device-sampling server, a request with top-k and top-p therefore runs in `topk_topp` mode. The kernel designed here replaces the
+`temperature` mode only, so it would not run under that setting.
+
+Conclusion: the sampler kernel is not scheduled. Step 0 (the no-kernel measurement, below) stays. The second kernel is
+chosen from a device profile.
 
 ### Measured basis
 
@@ -198,9 +210,11 @@ and the default flags (a one-line change in our patched `host.py`; there is no e
 arguments back from each server log.
 
 - If `temperature` at top logprobs 0 already reaches 2,600 tok/s or more at either flag setting, the probe gap came from
-  the top-logprob path or the flags, not from the sampler operations. Report that as the finding and build the kernel
-  only if a device profile of that configuration still shows the sampler scope at 1.0 ms or more per step.
-- If it stays near 2,200 tok/s, go on to the kernel.
+  the top-logprob path or the flags, not from the sampler operations. Report that as the finding. The kernel stays
+  unscheduled; it comes back as a candidate only if a device profile of that configuration still shows the sampler
+  scope at 1.0 ms or more per step.
+- If it stays near 2,200 tok/s, the kernel stays unscheduled for the reason in "Relevance to a published RL setting";
+  the device profile decides which kernel comes next.
 - These thresholds are proposed, not measured; they come from our analysis notes (not published).
 
 ### Bound of the gain
