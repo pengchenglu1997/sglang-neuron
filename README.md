@@ -7,8 +7,9 @@
 > **Sent upstream**
 > - Issue [#15](https://github.com/sgl-project/sglang-neuron/issues/15): in-place weight updates for RL rollout servers,
 >   with measurements. Upstream PR 20 now implements the full-checkpoint part.
-> - Branch `fix/compile-cache-stamp-race`: two servers that start together on one empty compile cache can stop at
->   start-up; a four-line fix with a CPU reproduction. Pull request not opened yet.
+> - Pull request [#22](https://github.com/sgl-project/sglang-neuron/pull/22) (branch `fix/compile-cache-stamp-race`):
+>   two servers that start together on one empty compile cache can stop at start-up; a four-line fix with a CPU
+>   reproduction.
 >
 > **Measured** (trn2.48xlarge, Neuron SDK 2.33, v0.1.0 image, TP4, one run each; sources in
 > [RESULTS.md](docs/rl/RESULTS.md) and issue #15)
