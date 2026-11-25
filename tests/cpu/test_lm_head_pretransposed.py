@@ -171,6 +171,42 @@ class LmHeadPretransposedTest(unittest.TestCase):
         self.assertNotIn("lm_head.weight", tied_off)
         self.assertEqual(tied_on["lm_head.weight"], tied_on["embed_tokens.weight"])
 
+    def test_default_layout_is_unchanged(self):
+        with tempfile.TemporaryDirectory() as directory:
+            _checkpoint(directory, False, seed=5)
+            self.assertEqual(self.build(False, None, directory).lm_head.weight_layout, "out_in")
+            self.assertEqual(self.build(False, "1", directory).lm_head.weight_layout, "in_out")
+
+    def test_vocab_shards_match_rows_loader(self):
+        """At TP 2 and 4, each rank's [H, V / tp] shard is the transpose of the rows loader's [V / tp, H] shard, the
+        shards side by side are the whole table transposed, and a checkpoint table shorter than the padded vocabulary
+        gives the same zero padding in both layouts."""
+        from safetensors import safe_open
+
+        weights = importlib.import_module("sglang_neuron.models.transformer.weights")
+        for stored_rows in (VOCAB, VOCAB - 3):
+            table = (torch.randn(stored_rows, HIDDEN, generator=torch.Generator().manual_seed(stored_rows))
+                     ).to(torch.bfloat16)
+            with tempfile.TemporaryDirectory() as directory:
+                path = os.path.join(directory, "t.safetensors")
+                save_file({"w": table}, path)
+                with safe_open(path, framework="pt") as f:
+                    for tp in (2, 4):
+                        rows = VOCAB // tp
+                        by_rows = weights.vocab_rows_loader(rows, HIDDEN)
+                        by_columns = weights.vocab_columns_loader(rows, HIDDEN)
+                        shards = []
+                        for rank in range(tp):
+                            r = by_rows.load([f.get_slice("w")], rank)
+                            c = by_columns.load([f.get_slice("w")], rank)
+                            self.assertEqual(tuple(c.shape), (HIDDEN, rows))
+                            self.assertTrue(c.is_contiguous())
+                            self.assertTrue(torch.equal(c, r.t()))
+                            shards.append(c)
+                        whole = torch.cat(shards, dim=1)
+                        self.assertTrue(torch.equal(whole[:, :stored_rows], table.t()))
+                        self.assertTrue(torch.equal(whole[:, stored_rows:], torch.zeros_like(whole[:, stored_rows:])))
+
     def test_switch_value_is_checked_and_registered(self):
         envs = self.config_module
         registry = importlib.import_module("sglang_neuron.env_registry")
