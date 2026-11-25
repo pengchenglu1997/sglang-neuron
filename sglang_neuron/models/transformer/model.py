@@ -218,7 +218,7 @@ class TransformerForCausalLM(nn.Module):
         self.norm = RMSNorm(config.hidden_size, config.rms_norm_eps)
         self.rotary_emb = RotaryEmbedding(config)
         # SGLANG_NEURON_LM_HEAD_PRETRANSPOSED: the LM head holds its shard as [H, V / tp], which its matmul reads as is,
-        # not [V / tp, H], which it transposes in each step
+        # not [V / tp, H] through F.linear (x @ W^T)
         self.lm_head_pretransposed = lm_head_pretransposed()
         self.lm_head = ColumnParallelLinear(config.hidden_size, config.vocab_size, dtype=DTYPE, gather_output=True,
                                             tp_group=group.device_group,
