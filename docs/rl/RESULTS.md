@@ -1,6 +1,7 @@
 # Results so far
 
-Measured results of the RL post-training work on Trainium2 with SGLang-Neuron, as of 2026-11-23.
+Measured results of the RL post-training work on Trainium2 with SGLang-Neuron, as of 2026-11-25. Section 8 (the trn2
+session of 2026-11-24) was added on 2026-11-25. Sentences that were out of date after that session were changed and say so.
 
 Rules for reading this file:
 
@@ -84,7 +85,9 @@ Qwen3-8B, TP4, rank 16 on seven projections, host-merge path (no kernel).
 | comparison | full-checkpoint update at 8B takes 5-6 s | so at 8B the adapter path is slower than the full path |
 
 Source: `docs/NIGHT_RECORD_2026-11-21.md` section 4. The shard-only adapter delta (`_LowRankSlice`) and the LoRA merge
-kernel aim at this number; neither has run on hardware (see [KERNELS.md](KERNELS.md)).
+kernel aim at this number. Changed 2026-11-25: the kernel ran on hardware on 2026-11-24 at Qwen3-0.6B (section 8.6); it
+has not been timed at Qwen3-8B in a server, and the shard-only delta has not run on hardware (see
+[KERNELS.md](KERNELS.md)).
 
 ## 4. Sampler modes
 
@@ -107,6 +110,10 @@ logprobs above 0, `neuron_compiler_args` in `models/host.py` keeps the default c
 by the code the two probe servers were compiled alike. The RL loop's `temperature` server has top logprobs 0, and in
 that case the decode compiles at `-O2`. So the probe's `temperature` row is not the configuration the loop runs, and
 the loop's configuration has no measured speed. See [KERNELS.md](KERNELS.md) section 2. Not read back from server logs.
+
+Changed 2026-11-25: the session of 2026-11-24 measured the `temperature`, `greedy` and `topk_topp` servers at Qwen3-0.6B
+with another harness (llmbench, prompt 1024, 64 requests per cell; section 8.4). Whether those servers ran with top
+logprobs 0 was not read back from their logs, so the sentence above about the loop's configuration still holds.
 
 ## 5. Decode profile
 
@@ -171,18 +178,268 @@ with conditions: [KERNELS.md](KERNELS.md) section 1.
 | mutation test of the wiring | 21 faults planted; 15 caught at first, 18 after the added tests; 3 have no test |
 
 What is not covered: compile with `neuronx-cc`, any device run, any timing, a real PEFT adapter, a run of the plugin's own
-CPU mode. The simulator is not a timing model.
+CPU mode. The simulator is not a timing model. Changed 2026-11-25: the first device runs of the LoRA merge kernel were
+made on 2026-11-24 (section 8.6); these CPU tests are unchanged.
+
+## 8. trn2 session of 2026-11-24
+
+Hardware for every row of this section: trn2.48xlarge spot (Trainium2), one chip = TP4 on 4 logical cores, unless a row
+names another layout. Images: `pytorch-inference-sglang-neuron:v0.1.0-neuron-py314-sdk-2.33.0-ubuntu26.04` and
+`pytorch-inference-vllm-neuronx:0.29.0.1.2.0-neuronx-py314-sdk2.33.1-ubuntu26.04`; NKI 0.7.0 in the SGLang image. In the
+SGLang image `general_plugin.py`, `models/host.py` and `models/transformer/model.py` have the md5 of tag v0.1.0;
+`backend/compile_cache.py` differs from the tag in one comment line only. Dates are Seattle local dates. The result files
+named below are from that session; they are not yet in `data/` of the public repo.
+
+Run conditions that bear on the numbers:
+
+- Many runs went on at the same time on other chips of the same machine. Repeats on a quieter machine agree within 1
+  percent (released defaults, greedy sampler, sampler kernel with `--dp-size 4`).
+- Every throughput cell is one run of 64 requests on one server start, 256 output tokens, unless the row says more.
+  Throughput is total output tokens over the wall time of the batch (llmbench at commit 08f4163, column
+  `output_token_throughput_tps`). TTFT is the median time to the first streamed chunk.
+- The first hardware test of the sampler kernel sent sampled requests without `top_p 1, top_k -1, min_p 0`. The
+  `temperature` sampler refused them with HTTP 400. The check script was changed to send them; the results below are from
+  the corrected script.
+
+### 8.1 Upstream PR 20 on its own branch
+
+Hardware, trn2.48xlarge, TP4. Three files of branch `upstream-pr/20` (`general_plugin.py`, `models/host.py`,
+`models/transformer/model.py`) over the v0.1.0 image; the md5 of each file is recorded in each result file. Launch flags:
+`--context-length 1024 --chunked-prefill-size 1024 --max-running-requests 32 --max-total-tokens 32768
+--cuda-graph-bs-decode 32`. The check compares answers and token logprobs of 20 prompts, 48 new tokens each (960 tokens).
+Run 2026-11-24. Files `75_pr20_check_pr20_q06.jsonl`, `75_pr20_check_pr20_q8.jsonl`.
+
+| What | Qwen3-0.6B | Qwen3-8B |
+|---|---|---|
+| in-place update to the other checkpoint, against a fresh start on that checkpoint | identical; largest logprob difference 0.0 | identical; 0.0 |
+| in-place update back, against the first start | identical; 0.0 | identical; 0.0 |
+| update time | 0.23 to 0.26 s (12 updates) | 5.0 s and 5.45 s (two updates) |
+| first start / restart on the other checkpoint | 265 s / 139 s | 360 s / 164 s |
+
+Smoke test at 0.6B, not a load test: 10 updates in a row all succeeded. One update with 8 short requests in flight gave 0
+HTTP errors, took 0.59 s, and the answers after it equal the reference of the new weights. Not run: 100 updates in a row,
+an update under a sustained load. Radix cache: only an indirect check ran (the first prompt, cached before the update,
+gave the fresh-start answer after it, difference 0.0); this shows no stale entry was served for that prompt, not that the
+cache was flushed. Nothing was posted to the pull request.
+
+### 8.2 Compile-cache stamp race
+
+Hardware, trn2.48xlarge. Two containers started together on one empty shared compile cache, 10 trials per arm. Run
+2026-11-24. File `74_stamp_race_r1.jsonl`. The fix is the branch `fix/compile-cache-stamp-race` (draft pull request 22).
+
+| Arm | Trials that failed |
+|---|---|
+| released code (v0.1.0) | 1 of 10 |
+| with the fix | 0 of 10 |
+
+In the failed trial the second container exited with code 1 and `FileNotFoundError: '/cache/neff/.KERNEL_SOURCES.195' ->
+'/cache/neff/KERNEL_SOURCES'` at line 196 of `compile_cache.py`. Process id 195 existed in both containers (ids 192 to 197 and
+193 to 198). The process-id ranges of the two containers overlapped in 10 of 10 trials of both arms. With a failure rate
+near 1 in 10, 0 of 10 does not prove the fix by itself. The fix removes the equal temporary name by construction.
+
+### 8.3 Baseline pair: vllm-neuron and SGLang-Neuron
+
+Hardware, trn2.48xlarge, one chip, TP4. Qwen3-0.6B, prompt 1024 tokens, 256 output tokens, 64 requests per cell, one run
+per cell. Cell: tok/s / TTFT p50. Run 2026-11-24.
+
+- vllm-neuron 0.29.0.1.2.0: TP4, max-model-len 4096, max-num-seqs 32.
+- SGLang-Neuron v0.1.0 released defaults: the image's example script `qwen3_0p6b/run_server.sh` with its own flags
+  (`--tp-size 4 --context-length 4096 --chunked-prefill-size 2048 --max-running-requests 64 --max-total-tokens 266240
+  --mem-fraction-static 0.4`), sampler `temperature`.
+
+| Concurrency | vllm-neuron 0.29.0.1.2.0 | SGLang-Neuron v0.1.0 |
+|---|---|---|
+| 1 | 209.9 / 0.021 s | 211.1 / 0.025 s |
+| 8 | 1,230.3 / 0.076 s | 1,168.0 / 0.075 s |
+| 32 | 2,375.3 / 0.276 s | 2,460.6 / 0.260 s |
+
+The full grid has 18 cells per engine (prompts 128, 1024 and 3072; concurrency 1, 2, 4, 8, 16, 32). It is in
+`77_pair_q06.md`; every cell there was run once except the repeat rows of the 1024 prompt. Repeat pass of the 1024-token
+row: tok/s within 0.2 percent for both engines (at concurrency 32: 2,375.3 and 2,372.2 for vllm-neuron, 2,460.6 and
+2,456.7 for SGLang-Neuron). SGLang-Neuron released defaults measured again later in the session: 211 / 1,161 / 2,459 tok/s
+(`77_pair_q06d.md`). The order of the two engines changes with concurrency in this table.
+
+Qwen3-8B, prompt 1024, 256 output tokens, SGLang-Neuron v0.1.0 released defaults (file `77_pair_q8.md`):
+
+| Concurrency | tok/s | TTFT p50 | Repeat pass tok/s |
+|---|---|---|---|
+| 1 | 109.3 | 0.067 s | 109.7 |
+| 8 | 604.8 | 0.211 s | 606.8 |
+| 32 | 1,419.7 | 0.744 s | 1,425.9 |
+
+There is no 8B pair. vllm-neuron did not start Qwen3-8B in two attempts (TP4, max-model-len 4096, container). The
+compiler `neuronx-cc` exited with code 70 and the error `NCC_EVRF059`: the kernel file of
+`vendored_kernels.rotational_topk` "does not exist on the host". We did not look for the cause.
+
+### 8.4 Serving changes, Qwen3-0.6B
+
+Hardware, trn2.48xlarge, Qwen3-0.6B, prompt 1024, 256 output tokens, run 2026-11-24. Cell: tok/s at concurrency 1 / 8 /
+32, one run per cell unless the row says more. "Text" is the answer to five fixed prompts at temperature 0 (48 tokens)
+against the released-defaults server. Files `opt_sweep_r9.md`, `81_opt_sweep_r9.jsonl`.
+
+Changes that moved the numbers:
+
+| Change | tok/s at 1 / 8 / 32 | TTFT p50 at 32 | Text |
+|---|---|---|---|
+| released defaults (reference) | 211 / 1,168 / 2,461 | 0.260 s | reference |
+| sampler `greedy` | 312 / 1,609 / 2,782 (second run: 312 / 1,610 / 2,783) | 0.259 s | same on 5 of 5 |
+| sampler `topk_topp` (decode compiled with the default arguments) | 218 / 1,266 / 2,607 | 0.271 s | same on 5 of 5 |
+| `--dp-size 4` of TP1 in one server, on the same four cores | 192 / 1,172 / 2,701 | 0.166 s | same on 5 of 5 |
+| 4 containers of TP1 on the same four cores (sum of four clients) | 192 / 1,189 / 2,756 | 0.140 s (median of four) | same on 5 of 5 |
+| 2 containers of TP2 (sum of two clients) | 129 / 461 / 1,513 | 0.203 s | differs on 1 of 5 |
+
+Changes that did not move the numbers:
+
+| Change | tok/s at 1 / 8 / 32 | TTFT p50 at 32 | Text |
+|---|---|---|---|
+| `--chunked-prefill-size 1024` | 211 / 1,162 / 2,459; prompt 3072 at concurrency 1 and 32: 202.3 and 1,972.9 against 203.6 and 1,974.8 | 0.267 s | same on 5 of 5 |
+| `NEURON_RT_XU_WORKER_ENABLE_LOW_LATENCY_COMPLETION=1` (platform default 0) | 211 / 1,160 / 2,456 | 0.261 s | same on 5 of 5 |
+
+Both differ from the released defaults by less than 1 percent in every cell (largest: 1,160 against 1,168 at concurrency
+8). Two passes on one server start of the released defaults differ by 0.2 percent or less (section 8.3). A second start
+later in the session gave 211 / 1,161 / 2,459 (`77_pair_q06d.md`), up to 0.6 percent from the first (1,161.1 against
+1,168.0 at concurrency 8).
+
+Not ready within 30 minutes, cause not read: greedy sampler with `--dp-size 4`, greedy sampler with 4 containers. Not run:
+chunk size 512, in-flight launches alone, and the controls that run the same graph as the released defaults. The
+concurrency-1 cell of a replica layout is one replica alone, which is why it is lower than the TP4 cell. Replica cells
+sum one client process per replica; the processes start together and are not time-aligned beyond that.
+
+### 8.5 Sampler kernel
+
+Hardware, trn2.48xlarge, one chip, TP4, run 2026-11-24. One NKI kernel replaces the shard-local stage of the
+`temperature` sampler (the per-column hash noise, the Gumbel score, the per-shard maximum and winner, and the
+log-sum-exp). The all-gather and the global merge stay the engine's code. Switch `RLKIT_SAMPLER_KERNEL=1`; unset, the
+released code path runs. Branch `feat/sampler-kernel` ([KERNELS.md](KERNELS.md) section 2). Simulator tests before the
+hardware run: 11 of 11 pass (`selftest_sampler_kernel.py`, NKI 0.7.0, CPU).
+
+Speed, prompt 1024, 256 output tokens, tok/s at concurrency 1 / 8 / 32, two passes each unless stated. Files
+`82_sampler_kernel_r10.md`, `82_sampler_kernel_r12.md`.
+
+| Server | Qwen3-0.6B | Qwen3-8B |
+|---|---|---|
+| released `temperature` sampler | 211 / 1,160 / 2,455 and 211 / 1,171 / 2,454 | 109 / 604 / 1,421 and 110 / 607 / 1,426 |
+| sampler kernel | 319 / 1,624 / 2,730 and 319 / 1,636 / 2,734 | 114 / 642 / 1,489 and 114 / 647 / 1,496 |
+| released `greedy` sampler (one pass) | 311 / 1,608 / 2,781 | 113 / 639 / 1,533 |
+
+At 8B the kernel is 4.5 to 6.6 percent above the released `temperature` sampler over the six cells of the table, from
+the unrounded values in `82_sampler_kernel_r12.md`. The lowest cell is pass 2 at concurrency 1 (109.5 to 114.5; the rounded
+table values, 110 to 114, would give 3.6) and the highest is pass 2 at concurrency 8 (606.9 to 647.3). At concurrency 32:
+1,421 to 1,489 and 1,426 to 1,496, which is 4.8 and 4.9 percent. At 0.6B and concurrency 32 the kernel
+(2,730) is below the released `greedy` sampler (2,781), and at 8B too (1,489 against 1,533).
+
+Sampled rollout as the RL loop asks for it: Qwen3-0.6B, temperature 0.7, 64 questions with 8 answers each, up to 256 new
+tokens, three passes (file `55_rollout_bench_roll_*.jsonl`).
+
+| Server | tok/s in the three passes |
+|---|---|
+| released `temperature` sampler | 2,283 / 2,335 / 2,295 |
+| sampler kernel | 2,472 / 2,484 / 2,484 |
+
+Pass by pass this is 8.3, 6.4 and 8.2 percent. The rollout is not a full RL loop.
+
+Combinations at Qwen3-0.6B (file `opt_sweep_r13.md`, `opt_sweep_r15.md`, `opt_sweep_r16.md`):
+
+| Server | tok/s at 1 / 8 / 32 | TTFT p50 at 32 |
+|---|---|---|
+| kernel, released default flags | 321 / 1,629 / 2,744 (TTFT 0.025 / 0.075 / 0.254 s) | 0.254 s |
+| kernel and `--dp-size 4` of TP1 in one server | 223 / 1,420 / 3,026 | 0.160 to 0.170 s |
+| the same, repeated | 3,039 and 3,048 at concurrency 32 (with `--stream-interval 4`; with 4 in-flight launches; neither changed the result), and 223 / 1,425 / 3,035 with the machine otherwise idle | |
+| kernel and 4 containers of TP1 (sum of four clients, one measurement) | 223 / 1,438 / 3,098 | 0.138 s |
+
+For comparison, the released `temperature` sampler with `--dp-size 4` gave 192 / 1,172 / 2,701 (section 8.4), and the
+released `temperature` sampler with 4 containers of TP1 gave 192 / 1,189 / 2,756. Logical-core configuration 1 with 8
+replicas on one chip was refused by the engine at start (`set_logical_nc_config`; this model's layout runs with 2).
+
+Correctness evidence (files `82_sampler_kernel_r10.jsonl`, `82_sampler_kernel_r12.jsonl`, `83_sampler_check2_r11.jsonl`):
+
+- The log line "sampler by the kernel" is in the log of every rank of the kernel server and absent from the released one.
+- Qwen3-0.6B, temperature 0, 20 prompts. Two released `temperature` servers agree bit for bit. The released `temperature`
+  sampler against the released `greedy` sampler: 17 of 20 prompts give the same tokens, largest logprob difference before
+  a fork 0.103. The released `temperature` sampler against the kernel: the same 17 of 20, the same fork positions, 0.103.
+  The kernel against the released `greedy` sampler: 20 of 20, largest logprob difference 5.7e-6. So the released engine's
+  `temperature` and `greedy` samplers differ at temperature 0 on 3 of 20 prompts, and the kernel output matches the
+  `greedy` one.
+- Qwen3-0.6B, temperature 0.8, request seeds, 60 requests of 48 tokens. The same server twice: 60 of 60 equal. Other
+  seeds: 1 of 60 equal. Two released servers: 60 of 60. Released against kernel: 44 of 60 whole sequences equal; 16 fork
+  later; mean logprob difference before a fork 0.012. The cause of the forks was not examined.
+- Qwen3-0.6B, first token of one prompt, temperature 1.0, 3,000 draws with the same seeds. Kernel and released give the
+  same count for every token (total variation 0.0). A second draw of the released server with other seeds differs from
+  the first by 0.019. Observed counts against the probabilities the server reports: chi-square 5.65 on about 7 degrees of
+  freedom.
+- Qwen3-8B, temperature 0, 20 prompts: the kernel equals the released `temperature` sampler on 20 of 20, largest logprob
+  difference 3.8e-6.
+- Concurrent requests, for information only (the two servers may batch the requests differently): at 0.6B 8 of 8 and 28
+  of 32 same tokens, at 8B 8 of 8 and 20 of 32.
+
+Limits: the `temperature` sampler only (not `topk_topp`; top logprobs above zero is refused with the switch on); Qwen3-0.6B
+and Qwen3-8B only; about 5 percent at 8B; not run inside a full RL loop; the released and kernel sequences are not equal
+at temperature 0.8 for 16 of 60 requests.
+
+### 8.6 LoRA merge kernel, first hardware run
+
+Hardware, trn2.48xlarge, run 2026-11-24. The kernel is on branch `feat/lora-merge-kernel`, run through the patched server
+with `RLKIT_DEVICE_WRITE=kernel`, `RLKIT_KERNEL_IMPL=nki`, `RLKIT_KERNEL_CHECK=all`, fp32 factors. NKI 0.7.0. The
+step-1 bench ran on one core of the same NUMA node as other runs of the session. This is the first run of this kernel on
+hardware. It is not called validated here.
+
+Step H1 (`tests/rlkit/hw_merge_kernel_bench.py`, one core, eager call; files `78_kernel_h1.jsonl`,
+`78_kernel_h1_bench.out`, `73_merge_kernel_bench.jsonl`): the kernel can be called on a NeuronCore outside a serving graph,
+eager and compiled. The bench ran to its end: 21 rows, none failed. Integer factors are bit-exact in 4 shapes. Float
+factors give the same result as eager torch on the device, element for element. Per Qwen3-8B shard, warm: kernel 0.19 to 0.67
+ms, torch on the device 0.50 to 1.80 ms over the five warm calls per shape, host merge 24 to 112 ms. These are single calls on one shard, not an adapter
+update of a server.
+
+Step H2 (`50_adapter_server_test.py`, Qwen3-0.6B, TP4, kernel mode; files `78_kernel_h2.jsonl`,
+`50_adapter_h2_06b.jsonl`):
+
+- The kernel ran in all 4 updates on all 4 ranks, 112 tensors each, with no fallback to the host.
+- Adapter 1, adapter 2, adapter 1 again: identical (logprob difference 0.0). The zero adapter equals the base (0.0).
+- Update time: 12.16 s for the first update, then 0.54 to 0.60 s.
+- Against a restart on the host-merged checkpoint the result is not equal: on 2 of 3 prompts the text is the same and the
+  mean logprob difference is 0.007 to 0.008 before any fork (largest 0.05 to 0.08). On the third prompt the answers fork
+  at token 0 (logprobs -1.056 against -0.985).
+
+Control (`75_pr20_check_ulp1.jsonl`; Qwen3-0.6B, 20 prompts, same check script as section 8.1): a copy of the base
+checkpoint in which 700 elements of each of 198 matrices were moved by one unit in the last place. Its logprobs differ from
+the base on all 20 prompts (first prompt: largest difference 0.074; per-token difference of the sums over the prompts:
+median 0.002, mean 0.010), and the length of 5 answers changes. This is the same order as the kernel-against-restart
+difference above. The reading: a difference of this size is what one-ulp weight differences alone produce in bf16 serving.
+That the one-ulp difference is the only cause is not proven.
+
+What this shows: the kernel runs on the device and is self-consistent (adapter 1, 2, 1 identical; zero adapter equals the
+base). What is open: the rule for accepting its result against a restart on the host-merged checkpoint (restart on a
+checkpoint merged by the kernel itself, step H4, was not run). It has not been timed at Qwen3-8B in a server (steps H3 to
+H5 not run).
+
+### 8.7 Qwen3-30B-A3B start probe
+
+Hardware, trn2.48xlarge, TP4 EP4, our `integration` branch (which carries upstream PRs 17 and 18), run 2026-11-24. One
+probe, not a baseline. The server was ready after 2,770 s (cold compile cache). The prompt "17 * 23" was answered 391. One
+cell: prompt 1024, concurrency 8, 256 output tokens, 32 requests: 153 tok/s, TTFT p50 0.508 s (file
+`80_moe30b_r8.jsonl`, `llmbench_moe30b_r8.csv`). No other cell, no comparison with the PRs switched off.
+
+### 8.8 Device profiles
+
+Captured, not analysed. Four decode steps of TP rank 0, three servers: released `temperature` sampler, sampler kernel,
+sampler kernel with `--dp-size 4` (four replicas). They were converted to parquet on the machine. Nothing in this file is
+derived from them. The existing script `59d_devprof_sum.py` does not read this layout (there is no `summary.json`).
 
 ## Not measured yet
+
+Changed 2026-11-25: the list below was edited after the session of 2026-11-24; items that session ran are marked.
 
 - The RL loop at Qwen3-8B. No 8B loop has run.
 - 8B training memory and speed. Weights alone take 16.38 GB of 25.8 GB on one core (from the plan); the 8B trainer
   (`trainer8b.py`) has been tested on CPU only.
-- Anything at 27-32B (Qwen3-30B-A3B, Qwen3.8-27B or similar): nothing has run, and the patch covers the Qwen3 dense family
-  only.
-- A weight update while requests are running (`68_update_under_load.py` exists and has not run on hardware).
+- Anything at 27-32B beyond one start probe: Qwen3-30B-A3B started once (section 8.7); Qwen3.8-27B or similar: nothing has
+  run. Our patch covers the Qwen3 dense family only.
+- A weight update while requests are running with our own script (`68_update_under_load.py` has not run). One update with 8
+  requests in flight ran on upstream PR 20's branch (section 8.1).
 - Any cost-normalised comparison with GPU, TPU or AMD accelerators. The one GPU figure above is a different layout and a
   different sync path.
-- Any kernel on hardware: the LoRA merge kernel, the sampler kernel, any attention change.
+- Kernels on hardware: the LoRA merge kernel and the sampler kernel ran on 2026-11-24 (sections 8.5 and 8.6). Not run: the
+  LoRA merge kernel in a server at Qwen3-8B, the sampler kernel's `topk_topp` mode, either kernel inside a full RL loop, any
+  attention change.
 - The adapter update at 8B with the shard-only delta, or with the kernel.
-- Long-answer cost with the context ladder on; the sampler at 8B; accuracy on a model other than Qwen3-0.6B.
+- Long-answer cost with the context ladder on; accuracy on a model other than Qwen3-0.6B.
