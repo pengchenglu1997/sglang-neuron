@@ -4,7 +4,7 @@ Upstream is sgl-project/sglang-neuron. Its `main` is one squashed commit (4e2432
 
 ## Rules for reading this file
 
-- Every number in the "Author reports" column is the author's own, copied from the PR text. **We have not run any of them.** The column "Run by us" is "no" for every row until a hardware task in [ROADMAP.md](https://github.com/pengchenglu1997/trainium-sglang-rl/blob/main/docs/plan/ROADMAP.md) writes a result next to it.
+- Every number in the "Author reports" column is the author's own, copied from the PR text. **We have run PR 20 only, and only the checks named in its row** (changed 2026-11-25; until 2026-11-24 the column read "no" for every row). The column "Run by us" is "no" for every other row until a hardware task in [ROADMAP.md](https://github.com/pengchenglu1997/trainium-sglang-rl/blob/main/docs/plan/ROADMAP.md) writes a result next to it. Our own results are in [RESULTS.md](RESULTS.md) section 8.
 - The authors ran on different hardware. Many ran on trn3. We use trn2, so a trn3 result does not tell us the result on trn2. The column says which one the author used.
 - Decisions:
   - **integrated**: merged into our branch `integration`, in the order given below.
@@ -16,12 +16,12 @@ Upstream is sgl-project/sglang-neuron. Its `main` is one squashed commit (4e2432
 
 | PR | Author | What it does | Our decision | Reason in one line | Author reports (validation) | Run by us |
 |---|---|---|---|---|---|---|
-| 20 | @Zhichenzzz | Reload Qwen3 and Qwen3-MoE weights from disk in place (`update_weights_from_disk`) | integrated (first) | It is the upstream route for our issue 15 and the base for full-checkpoint sync. | trn3.48xlarge. Qwen3-4B TP4: update returns in about 1.9 s, greedy output identical before and after reloading the same weights. Miles GRPO with disk-delta sync on Qwen3-4B and Qwen3-30B-A3B: trainer-vs-rollout logprob abs diff 0.007 to 0.015, 30+ syncs on the 30B run. | no |
+| 20 | @Zhichenzzz | Reload Qwen3 and Qwen3-MoE weights from disk in place (`update_weights_from_disk`) | integrated (first) | It is the upstream route for our issue 15 and the base for full-checkpoint sync. | trn3.48xlarge. Qwen3-4B TP4: update returns in about 1.9 s, greedy output identical before and after reloading the same weights. Miles GRPO with disk-delta sync on Qwen3-4B and Qwen3-30B-A3B: trainer-vs-rollout logprob abs diff 0.007 to 0.015, 30+ syncs on the 30B run. | yes, on its own branch (`upstream-pr/20`), trn2.48xlarge, 2026-11-24: Qwen3-0.6B and Qwen3-8B, TP4. In-place update against a fresh start on the same checkpoint: same text, largest token logprob difference 0.0, 20 prompts of 48 tokens, both ways (to the other checkpoint and back). Update 0.23 to 0.26 s at 0.6B (12 updates), 5.0 s and 5.45 s at 8B. At 0.6B: 10 updates in a row ok; one update with 8 short requests in flight, 0 HTTP errors, 0.59 s. Not run: 100 in a row, a sustained load, Qwen3-30B-A3B or Qwen3-4B, the author's trainer setup. [RESULTS.md](RESULTS.md) section 8.1 |
 | 4 | @whn09 | Paged decode: stop passing `max_context_len` to nkilib attention | integrated | It fixes wrong output when the decode prior is above nkilib's 8K flash-attention tile, and the dense Qwen3 decode path uses this file. | trn2.48xlarge, Qwen3-30B-A3B TP8 EP8. A needle test at 8,132 / 8,204 / 9,644 / 24,044 / 76,844 / 240,044 tokens with and without the argument. | no |
 | 9 | @ttpks1010 | Add Llama 3.1 8B on the shared dense transformer | integrated | New package only, changes no shared runtime file, and gives a second dense target for weight sync (G1) and a common benchmark model (G2). | trn2.3xlarge, TP4, SDK 2.33. Greedy tokens identical to Hugging Face in 151 of 151 at a 4096 context. GSM8K first 100 questions, five-shot: 0.78. | no |
 | 16 | @zcnrex | Cache a failing torch_mlir import and traceback formatting at trace time | integrated | It changes only trace-time work, is easy to revert, and shortens every launch. | trn3.48xlarge, Qwen3-30B-A3B. Warm launch ready 496 s down to 311 s (author states -37%), measured with PR 12's trace-ahead warm-up included. Author states zero neuronx-cc compiles on an existing cache and identical tokens. | no |
-| 17 | @jimburtoft | Qwen3-MoE prefill experts in the hybrid `moe_cte` form on trn2 | integrated | Gated by an environment switch, touches only MoE prefill, and it is our 30B-rung hardware class (G1, G2). | trn2.3xlarge, Qwen3-30B-A3B TP4 EP4. Output tok/s at 2048 in / 128 out, concurrency 64: 220.2 to 371.0 (author states +68%). Decode unchanged, c=1 TPOT 45.8 ms on both. | no |
-| 18 | @jimburtoft | Qwen3-MoE decode experts run selectively for batches of up to 4 tokens | integrated | Default-safe (a switch restores main), MoE only, cheap to carry. It helps single-request latency, not a throughput-bound rollout. | trn2.3xlarge, Qwen3-30B-A3B TP4 EP4. 128 in / 512 out, c=1: TPOT 45.8 ms to 17.1 ms (author states 2.6x). No change above 4 rows. | no |
+| 17 | @jimburtoft | Qwen3-MoE prefill experts in the hybrid `moe_cte` form on trn2 | integrated | Gated by an environment switch, touches only MoE prefill, and it is our 30B-rung hardware class (G1, G2). | trn2.3xlarge, Qwen3-30B-A3B TP4 EP4. Output tok/s at 2048 in / 128 out, concurrency 64: 220.2 to 371.0 (author states +68%). Decode unchanged, c=1 TPOT 45.8 ms on both. | started only (2026-11-24): our `integration` branch, which carries 17 and 18, served Qwen3-30B-A3B on trn2.48xlarge, TP4 EP4, as one probe (ready after 2,770 s, one throughput cell). No run with the PR off, so nothing about its effect. [RESULTS.md](RESULTS.md) section 8.7 |
+| 18 | @jimburtoft | Qwen3-MoE decode experts run selectively for batches of up to 4 tokens | integrated | Default-safe (a switch restores main), MoE only, cheap to carry. It helps single-request latency, not a throughput-bound rollout. | trn2.3xlarge, Qwen3-30B-A3B TP4 EP4. 128 in / 512 out, c=1: TPOT 45.8 ms to 17.1 ms (author states 2.6x). No change above 4 rows. | started only (2026-11-24): same probe as PR 17, same limits. [RESULTS.md](RESULTS.md) section 8.7 |
 | 21 | @Zhichenzzz | `POST /pull_weights`: pull published weight deltas into a host-local checkpoint | tracked branch (on top of PR 20) | Matters only for full-parameter RL at 27 to 32B. It adds a 352-line copied module and new dependencies we have not confirmed in the image, and it needs a trainer format we do not produce. | trn3.48xlarge. Miles GRPO with disk-delta transfer on Qwen3-4B and Qwen3-30B-A3B. Every sync pulls and reloads, checksums verify on each pull, 30+ syncs on the 30B run. | no |
 | 11 | @whn09 | Warm-up: queue every graph compile first, trace each shape once | tracked branch | It is measured on our configuration but is on by default, rewrites warm-up for every model, and has a known SPMD ordering risk. Excludes 12. | "Measured on main"; PR 11 does not name the instance (PR 10, same author, gives the same 540 s cache-off row on a trn2.48xlarge). Qwen3-8B TP4, empty NEFF cache. Ready 1467 s to 540 s. GSM8K 0.940 and TPOT 12.71 ms the same both ways. | no |
 | 10 | @whn09 | Keep dynamo traces across launches (`SGLANG_NEURON_PRECOMPILE_CACHE=1`) | tracked branch (stacked on 11) | Largest restart win on our hardware, but 385 lines on torch-neuronx caching internals, contains PR 11's commits and conflicts with 12. | trn2.48xlarge, Qwen3-8B TP4, SDK 2.33. Ready: cache off 540 s, first launch 530 s, restored 92 s. GSM8K 0.940 and 26 NEFFs in all three. | no |
@@ -48,7 +48,7 @@ Notes on the table:
 
 ## Merge order for the `integration` branch
 
-`main` is upstream v0.1.0 plus these documents, with no code change. Branch `integration` is `main` plus PRs 20, 4, 9, 16, 17, 18 in that order. None of them has been run by us. Each PR also lives as its own branch `upstream-pr/<N>`, the unchanged upstream PR head.
+`main` is upstream v0.1.0 plus these documents, with no code change. Branch `integration` is `main` plus PRs 20, 4, 9, 16, 17, 18 in that order. Changed 2026-11-25: PR 20 was run by us on its own branch on 2026-11-24 (RESULTS section 8.1), and `integration` was started once on Qwen3-30B-A3B (section 8.7). None of the PRs was run against its own claims on `integration`. Each PR also lives as its own branch `upstream-pr/<N>`, the unchanged upstream PR head.
 
 Conflicts to expect, and what to do:
 
@@ -71,11 +71,11 @@ Conflicts for tracked branches against `integration`:
 
 ## Check that must pass before we rely on each integrated PR
 
-All checks are on trn2 with SDK 2.33. None has been run. "Fresh start" means a new server started on that checkpoint.
+All checks are on trn2 with SDK 2.33. Changed 2026-11-25: the first two checks of PR 20 ran on 2026-11-24 (result in the row); no other row has been run. "Fresh start" means a new server started on that checkpoint.
 
 | PR | Check before relying |
 |---|---|
-| 20 | Qwen3-0.6B TP4 and Qwen3-8B TP4. Update to a different checkpoint and compare token logprobs with a fresh start on that checkpoint. Update back and compare with the first start. Check that the radix cache is flushed after the update. |
+| 20 | Qwen3-0.6B TP4 and Qwen3-8B TP4. Update to a different checkpoint and compare token logprobs with a fresh start on that checkpoint. Update back and compare with the first start. Check that the radix cache is flushed after the update. Ran 2026-11-24 on both models: update to the other checkpoint against a fresh start, and back against the first start, both with largest token logprob difference 0.0 (RESULTS section 8.1). Radix cache: only an indirect check ran (the first prompt, cached before the update, gave the fresh-start answer after it, difference 0.0); this shows no stale entry was served for that prompt, not that the cache was flushed. |
 | 4 | Qwen3-8B TP4. Greedy tokens identical to main on a short GSM8K prompt (below 8K). Needle test at 8,204 / 9,644 / 24,044 tokens with and without the PR. Record the recompile time after the cache restamp. The author's text implies no change below 8K, but nobody has measured that, and long-context decode now reads every tile (the author did not time this). |
 | 9 | TP4. Greedy token parity with Hugging Face on a 4096-token prompt (the PR reports 151 of 151) and GSM8K first 100 (the PR reports 0.78). |
 | 16 | Qwen3-8B TP4, warm cache. Ready time with and without the PR, greedy tokens equal, zero neuronx-cc compiles, and a log line showing whether the stub installed in our image. |
@@ -84,7 +84,7 @@ All checks are on trn2 with SDK 2.33. None has been run. "Fresh start" means a n
 
 ## How our patch relates to PR 20 and PR 21
 
-Our patch is branch `feat/inplace-adapter-sync`, on top of v0.1.0. It changes `sglang_neuron/general_plugin.py`, `sglang_neuron/models/host.py` and `sglang_neuron/models/qwen3/sglang_model.py`. The kernel files `sglang_neuron/models/rlkit_kernel_path.py` and `sglang_neuron/models/rlkit_lora_merge.py`, the kernel branch in `host.py` and the CPU tests in `tests/rlkit/` are on branch `feat/lora-merge-kernel`, on top of it. The patch was hardware-tested on trn2 for Qwen3-0.6B and Qwen3-8B (full update and adapter sync). The kernel write mode was not run on hardware. Other model families, pipeline parallel and MoE were not tested with the adapter path.
+Our patch is branch `feat/inplace-adapter-sync`, on top of v0.1.0. It changes `sglang_neuron/general_plugin.py`, `sglang_neuron/models/host.py` and `sglang_neuron/models/qwen3/sglang_model.py`. The kernel files `sglang_neuron/models/rlkit_kernel_path.py` and `sglang_neuron/models/rlkit_lora_merge.py`, the kernel branch in `host.py` and the CPU tests in `tests/rlkit/` are on branch `feat/lora-merge-kernel`, on top of it. The patch was hardware-tested on trn2 for Qwen3-0.6B and Qwen3-8B (full update and adapter sync). Changed 2026-11-25: the kernel write mode ran on hardware on 2026-11-24 at Qwen3-0.6B (RESULTS section 8.6); it has not run at Qwen3-8B in a server. Other model families, pipeline parallel and MoE were not tested with the adapter path.
 
 Overlap with PR 20:
 
@@ -98,22 +98,22 @@ Decision:
 - What upstream does not cover, and we keep:
   - The LoRA adapter route: `adapter_config.json` in the folder, host base copies, a pre-write coverage check, refusal of rslora and dora, and the lazy low-rank slice.
   - Two steps of our hook that PR 20 does not have: `drain_launches` before the first write and `torch_neuronx.synchronize()` after the last. We never ran without them, so we do not know whether they are needed. Our patch also logs how many live parameters and buffers an update covered.
-  - The LoRA shard-merge NKI kernel (simulator only).
+  - The LoRA shard-merge NKI kernel (CPU simulator on 2026-11-23; first hardware run on 2026-11-24 at Qwen3-0.6B, acceptance rule open: [KERNELS.md](KERNELS.md) section 1).
   - The `RLKIT_DECODE_LADDER` switch in `models/qwen3/sglang_model.py`, a separate small item.
 - PR 21 (delta pull) is a tracked branch on top of PR 20. It needs a trainer that publishes the `weight_v{N:06d}` format, and ours does not.
-- PR 20 rejects unknown tensors and shape mismatches before the first `copy_`, and its checkpoint loader raises when a mapped key is missing. We have not run PR 20, so this document makes no claim about what it lacks.
+- PR 20 rejects unknown tensors and shape mismatches before the first `copy_`, and its checkpoint loader raises when a mapped key is missing. We ran PR 20's own branch on trn2 on 2026-11-24. In place against a fresh start on the same checkpoint it gave the same text and a largest token logprob difference of 0.0 at Qwen3-0.6B and Qwen3-8B, to the other checkpoint and back; the update took 0.23 to 0.26 s at 0.6B (12 updates; a 13th update with 8 requests in flight took 0.59 s) and 5.0 s and 5.45 s at 8B (RESULTS section 8.1).
 
 Plan for the fork, in order:
 
 1. Branch `main` = upstream v0.1.0 plus these documents, no code change. Branch `integration` = `main` + 20, 4, 9, 16, 17, 18, conflicts resolved as listed above.
 2. Our patch is branch `feat/inplace-adapter-sync` on top of v0.1.0. It is not on `integration`, because it and PR 20 hook the same function (see above).
-3. The LoRA merge kernel is on its own branch `feat/lora-merge-kernel`, on top of `feat/inplace-adapter-sync`, marked "NKI 0.7.0 CPU simulator only, not run on hardware". Its CPU tests are in `tests/rlkit/` (`bash tests/rlkit/run_all.sh`).
+3. The LoRA merge kernel is on its own branch `feat/lora-merge-kernel`, on top of `feat/inplace-adapter-sync`, marked "NKI 0.7.0 CPU simulator; first hardware run 2026-11-24 at Qwen3-0.6B, acceptance rule open" (changed 2026-11-25). Its CPU tests are in `tests/rlkit/` (`bash tests/rlkit/run_all.sh`).
 4. The unchanged heads of upstream PRs 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16, 17, 18, 20 and 21 are branches `upstream-pr/<N>`. The experiment scripts, launchers and session records stay in https://github.com/pengchenglu1997/trainium-sglang-rl .
 5. Later, as named tasks in our roadmap (not public) and not done blind:
    - `feat/adapter-sync-on-pr20`: the hook becomes a thin wrapper. If `adapter_config.json` is present, call our adapter function. Otherwise fall through to PR 20's reload. The adapter function uses the live first graph's `hf_weight_mappings()` and the loaders PR 20 keeps, instead of `build_graph`. Base copies are cleared on every full reload. Check that the kept loaders accept `_LowRankSlice`. Done only with the Qwen3-0.6B and Qwen3-8B adapter re-tests (adapter 1, 2, 1, zero adapter, each equal to a fresh start on the host-merged checkpoint).
-   - Run PR 20's own branch on trn2 (in place against a fresh start, 100 updates in a row, updates under load) and post the results on PR 20. What we send upstream is what ran on hardware.
+   - Run PR 20's own branch on trn2 (in place against a fresh start, 100 updates in a row, updates under load) and post the results on PR 20. What we send upstream is what ran on hardware. Changed 2026-11-25: the first part ran on 2026-11-24 (in place against a fresh start, 10 updates in a row, one update with 8 requests in flight); 100 updates in a row and a sustained load did not run; nothing has been posted.
    - Propose the adapter route upstream as a separate PR once the re-base passes, linked from issue 15.
-   - Port the kernel into the adapter write path only after a hardware run of the kernel.
+   - Port the kernel into the adapter write path only after a hardware run of the kernel. Changed 2026-11-25: a hardware run exists at Qwen3-0.6B (RESULTS section 8.6); the acceptance rule is open, so this stays not done.
    - A `reload_weights` path for PR 6 (it has a host `load_weights` and a module-level `hf_weight_mappings(graph)` but no `reload_weights`) and the `k_eq_v` check for PR 2, only if the 27 to 32B rung needs them.
 
 ## Ideas worth borrowing from PRs we do not merge

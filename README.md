@@ -9,10 +9,11 @@
 >   with measurements. Upstream PR 20 now implements the full-checkpoint part.
 > - Draft pull request [#22](https://github.com/sgl-project/sglang-neuron/pull/22) (branch
 >   `fix/compile-cache-stamp-race`): two servers that start together on one empty compile cache can stop at start-up.
->   The failure was seen on trn2; the four-line fix has a CPU reproduction only and stays a draft until it has run on
->   the machine.
+>   The failure was seen on trn2; the four-line fix had a CPU reproduction only when it was sent. It ran on trn2 on
+>   2026-11-24 (table below); the pull request text was not changed.
 >
-> **Measured** (trn2.48xlarge, Neuron SDK 2.33, v0.1.0 image, TP4, one run each; sources in
+> **Measured** (hardware, trn2.48xlarge (Trainium2), Neuron SDK 2.33, v0.1.0 image; one chip = TP4 on 4 logical cores
+> unless the row says otherwise; one run each unless the row says otherwise; sources in
 > [RESULTS.md](docs/rl/RESULTS.md) and issue #15)
 >
 > | What | Result |
@@ -22,17 +23,23 @@
 > | Qwen3-8B: full update; LoRA adapter update (host merge) | 4.7-6.2 s; 13.9-14.0 s |
 > | Qwen3-0.6B: LoRA adapter update | 0.67-0.70 s |
 > | RL loop on Qwen3-0.6B, 150 steps, 3 seeds | 5.31-5.33 s a step (median); greedy accuracy on 500 GSM8K questions 0.572-0.574 before, 0.702-0.728 after |
-> | LoRA shard-merge NKI kernel | CPU simulator only. Not run on hardware |
+> | Upstream PR 20's own branch, Qwen3-0.6B and Qwen3-8B, 2026-11-24 | in-place update against a fresh start on the same checkpoint: same text, largest token logprob difference 0.0, 20 prompts, both ways; update 0.23-0.26 s (0.6B, 12 updates; a 13th update with 8 requests in flight took 0.59 s), 5.0 and 5.45 s (8B) |
+> | Compile-cache stamp race, two containers started together on one empty cache, 10 trials per arm, 2026-11-24 | released code: 1 of 10 trials failed; with the fix: 0 of 10 |
+> | Baseline pair, Qwen3-0.6B, prompt 1024, 256 output tokens, concurrency 32, 2026-11-24 | vllm-neuron 0.29.0.1.2.0: 2,375.3 tok/s; SGLang-Neuron v0.1.0 released defaults: 2,460.6 tok/s (concurrency 1: 209.9 and 211.1; 8: 1,230.3 and 1,168.0). vllm-neuron did not start Qwen3-8B in two attempts |
+> | Sampler kernel (`temperature` sampler only), Qwen3-0.6B, same prompt and concurrency 32, two passes | 2,730 and 2,734 tok/s; released `temperature` sampler 2,455 and 2,454. At Qwen3-8B: 1,489 and 1,496 against 1,421 and 1,426 (about 5 percent). Not run in a full RL loop |
+> | Sampler kernel with `--dp-size 4` of TP1 in one server, Qwen3-0.6B, same prompt and concurrency 32 | 3,026 tok/s; again 3,035 with the same flags, 3,039 with `--stream-interval 4` and 3,048 with 4 in-flight launches. The released `temperature` sampler with `--dp-size 4`: 2,701 (one measurement) |
+> | LoRA shard-merge NKI kernel, first hardware run, Qwen3-0.6B TP4, 2026-11-24 | runs on the device and is self-consistent (adapter 1, 2, 1 identical; zero adapter equals base); update 0.54-0.60 s after a first update of 12.16 s. Against a restart on the host-merged checkpoint: 2 of 3 prompts give the same text with a mean logprob difference of 0.007-0.008 before any fork; the third forks at token 0. A one-ulp control gives differences of the same order. Update times are with the read-back check on (`RLKIT_KERNEL_CHECK=all`). Acceptance rule open; not timed at Qwen3-8B in a server |
 >
 > **Branches**
 >
 > | Branch | What it holds | Tested how |
 > |---|---|---|
 > | `main` | upstream v0.1.0 plus [`docs/rl/`](docs/rl/). No code change | - |
-> | `fix/compile-cache-stamp-race` | the start-up fix above, on upstream `main` | CPU reproduction only; not run on hardware |
+> | `fix/compile-cache-stamp-race` | the start-up fix above, on upstream `main` | CPU reproduction; trn2 on 2026-11-24 (10 trials per arm, table above) |
 > | `feat/inplace-adapter-sync` | in-place weight update and LoRA adapter sync | trn2, Qwen3-0.6B and 8B; the per-shard delta on CPU only |
-> | `feat/lora-merge-kernel` | LoRA shard-merge NKI kernel, off by default, with CPU tests in `tests/rlkit/` ([notes](docs/rl/KERNELS.md)) | NKI 0.7.0 CPU simulator only |
-> | `integration` | `main` plus upstream PRs 20, 4, 9, 16, 17, 18 ([decisions and reasons](docs/rl/UPSTREAM_PRS.md)) | compiles; not run by us on hardware |
+> | `feat/lora-merge-kernel` | LoRA shard-merge NKI kernel, off by default, with CPU tests in `tests/rlkit/` ([notes](docs/rl/KERNELS.md)) | NKI 0.7.0 CPU simulator; first hardware run on trn2 2026-11-24 at Qwen3-0.6B (row above) |
+> | `feat/sampler-kernel` | sampler NKI kernel for the `temperature` sampler, off by default (`RLKIT_SAMPLER_KERNEL=1`) ([notes](docs/rl/KERNELS.md)) | NKI 0.7.0 CPU simulator; trn2 on 2026-11-24 at Qwen3-0.6B and Qwen3-8B (rows above) |
+> | `integration` | `main` plus upstream PRs 20, 4, 9, 16, 17, 18 ([decisions and reasons](docs/rl/UPSTREAM_PRS.md)) | compiles; started once on Qwen3-30B-A3B on trn2 (one probe, 2026-11-24); the PRs' own claims not run |
 > | `upstream-pr/<N>` | unchanged heads of the upstream PRs we carry or track | by their authors |
 >
 > Experiment scripts and session records are in
