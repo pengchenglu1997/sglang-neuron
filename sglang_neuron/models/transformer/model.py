@@ -17,7 +17,7 @@ from sglang_neuron.layers import ColumnParallelLinear
 from sglang_neuron.layers.embedding import VocabDimShardedEmbedding
 from sglang_neuron.mem_cache.kv_cache import KVSpec, LayerSpec
 from sglang_neuron.models.transformer import weights
-from sglang_neuron.models.transformer.config import DTYPE, TransformerConfig
+from sglang_neuron.models.transformer.config import DTYPE, TransformerConfig, lm_head_pretransposed
 from sglang_neuron.ops.attention.attention_decode_paged import attention_decode_paged, paged_decode_inputs
 from sglang_neuron.ops.attention.qkv_paged import qkv_paged
 from sglang_neuron.parallel import collectives as neuron_collectives
@@ -217,17 +217,21 @@ class TransformerForCausalLM(nn.Module):
                                      for i in range(config.num_hidden_layers)])
         self.norm = RMSNorm(config.hidden_size, config.rms_norm_eps)
         self.rotary_emb = RotaryEmbedding(config)
+        # SGLANG_NEURON_LM_HEAD_PRETRANSPOSED: the LM head holds its shard as [H, V / tp], which its matmul reads as is,
+        # not [V / tp, H], which it transposes in each step
+        self.lm_head_pretransposed = lm_head_pretransposed()
         self.lm_head = ColumnParallelLinear(config.hidden_size, config.vocab_size, dtype=DTYPE, gather_output=True,
-                                            tp_group=group.device_group)
+                                            tp_group=group.device_group,
+                                            weight_layout="in_out" if self.lm_head_pretransposed else "out_in")
         set_weight_loader(self.embed_tokens.weight,
                           weights.vocab_rows_loader(self.embed_tokens.vocab_size_per_rank, config.hidden_size))
-        if config.tie_word_embeddings:
+        if config.tie_word_embeddings and not self.lm_head_pretransposed:
             # one device copy: the LM head's vocabulary shard is the embedding's (the TP size divides the vocabulary,
             # which the LM head refuses otherwise)
             self.lm_head.weight = self.embed_tokens.weight
         else:
-            set_weight_loader(self.lm_head.weight,
-                              weights.vocab_rows_loader(self.lm_head.out_features_per_rank, config.hidden_size))
+            loader = weights.vocab_columns_loader if self.lm_head_pretransposed else weights.vocab_rows_loader
+            set_weight_loader(self.lm_head.weight, loader(self.lm_head.out_features_per_rank, config.hidden_size))
 
     def build_mlp(self, config: TransformerConfig, layer_idx: int) -> nn.Module:
         return MLP(config, self.fused_gate_up)
@@ -264,6 +268,9 @@ class TransformerForCausalLM(nn.Module):
         mappings = {"embed_tokens.weight": "model.embed_tokens.weight", "norm.weight": "model.norm.weight"}
         if not self.config.tie_word_embeddings:
             mappings["lm_head.weight"] = "lm_head.weight"
+        elif self.lm_head_pretransposed:
+            # a tied model's own LM head copy is filled from the embedding's checkpoint tensor
+            mappings["lm_head.weight"] = "model.embed_tokens.weight"
         for i, layer in enumerate(self.layers):
             src, dst = f"model.layers.{i}", f"layers.{i}"
             attn = f"{src}.self_attn"
@@ -296,5 +303,5 @@ class TransformerForCausalLM(nn.Module):
         state = checkpoint.load_sharded_pipelined(self.tp_group.rank_in_group, self.tp_group.world_size, self,
                                                   self.hf_weight_mappings(), device).state_dict
         self.load_state_dict(state, strict=False, assign=True)
-        if self.config.tie_word_embeddings:
+        if self.config.tie_word_embeddings and not self.lm_head_pretransposed:
             self.lm_head.weight = self.embed_tokens.weight
