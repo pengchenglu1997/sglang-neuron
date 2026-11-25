@@ -1,0 +1,10 @@
+# AGENTS.md (this fork)
+
+For team members and their coding agents. This fork follows sgl-project/sglang-neuron.
+
+1. Before any work here, follow the team protocol in the team hub (private, team members only):
+   https://github.com/pengchenglu1997/trainium-rl-hub (read its AGENTS.md; search its issues, LEDGER.md and LESSONS.md first; claim an issue).
+2. This repository is public. Push only our own measured results and code. No names, no chat content, no prices, no instance or account ids, no local paths, no numbers measured by others.
+3. Pull requests: `gh pr create` in a fork targets the upstream repository by default. For a team pull request always pass `--repo pengchenglu1997/sglang-neuron`. A pull request to upstream needs the team lead's yes first.
+4. A branch meant for upstream starts from upstream `main` (`origin/main`), not from this fork's `main`, so that this file and `docs/rl/` do not travel with it.
+5. Results are recorded in the team hub's ledger; `docs/rl/RESULTS.md` here is the long public write-up.
