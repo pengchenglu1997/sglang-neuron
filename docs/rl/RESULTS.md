@@ -188,7 +188,9 @@ names another layout. Images: `pytorch-inference-sglang-neuron:v0.1.0-neuron-py3
 `pytorch-inference-vllm-neuronx:0.29.0.1.2.0-neuronx-py314-sdk2.33.1-ubuntu26.04`; NKI 0.7.0 in the SGLang image. In the
 SGLang image `general_plugin.py`, `models/host.py` and `models/transformer/model.py` have the md5 of tag v0.1.0;
 `backend/compile_cache.py` differs from the tag in one comment line only. Dates are Seattle local dates. The result files
-named below are from that session; they are not yet in `data/` of the public repo.
+named below are from that session. Changed 2026-11-25: they are in `data/2026-11-24_trn2/` of the public repo
+(https://github.com/pengchenglu1997/trainium-sglang-rl), whose README maps each file to a subsection here. Not there:
+per-request benchmark files, server logs, `.out` files, device profiles, and the probe scripts 73 to 81.
 
 Run conditions that bear on the numbers:
 
