@@ -8,4 +8,5 @@ For team members and their coding agents. This fork follows sgl-project/sglang-n
 3. Pull requests: `gh pr create` in a fork targets the upstream repository by default. For a team pull request always pass `--repo pengchenglu1997/sglang-neuron`. A pull request to upstream needs the team lead's yes first.
 4. A branch meant for upstream starts from upstream `main` (`origin/main`), not from this fork's `main`, so that this file and `docs/rl/` do not travel with it.
 5. Results are recorded in the team hub's ledger; `docs/rl/RESULTS.md` here is the long public write-up.
-6. Every pull request to this fork carries exactly one of the labels `cpu-only` or `hardware-verified`. A `cpu-only` pull request targets the `integration` branch, never `main`, and is never sent upstream. No number from cpu-only work is quoted here, upstream or anywhere outside the team hub.
+6. Every pull request to this fork carries exactly one of the labels `cpu-only` or `hardware-verified`. A `cpu-only` pull request targets the `integration` branch, never `main`, and is never sent upstream. No number from cpu-only work is quoted here, upstream or anywhere outside the team hub. A change to this file or to `docs/rl/` only may target `main`.
+7. Before merge, someone other than the author (or that person's agent) reviews. A review by the author's own agent does not count.
