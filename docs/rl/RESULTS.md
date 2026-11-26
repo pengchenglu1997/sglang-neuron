@@ -190,7 +190,8 @@ SGLang image `general_plugin.py`, `models/host.py` and `models/transformer/model
 `backend/compile_cache.py` differs from the tag in one comment line only. Dates are Seattle local dates. The result files
 named below are from that session. Changed 2026-11-25: they are in `data/2026-11-24_trn2/` of the public repo
 (https://github.com/pengchenglu1997/trainium-sglang-rl), whose README maps each file to a subsection here. Not there:
-per-request benchmark files, server logs, `.out` files, device profiles, and the probe scripts 73 to 81.
+per-request benchmark files, server logs, `.out` files and device profiles. The probe scripts 73 to 81 are at the top
+level of that repo (index: its `docs/EXPERIMENTS.md` section 8); the patch folders they mount are branches of this fork.
 
 Run conditions that bear on the numbers:
 
