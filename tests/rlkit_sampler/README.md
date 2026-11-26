@@ -1,10 +1,12 @@
 # Sampler kernel for SGLang-Neuron v0.1.0 (temperature sampler)
 
-This branch holds one NKI kernel that replaces the shard-local stage of the engine's temperature sampler. It is off by
-default. Nothing here has been proposed upstream.
+One NKI kernel that replaces the shard-local stage of the engine's temperature sampler. It is off by default. Nothing
+here has been proposed upstream.
 
-Base: `4e24326`, the v0.1.0 snapshot (the commit `feat/inplace-adapter-sync` and `feat/lora-merge-kernel` also start
-from). The branch does not depend on either of them.
+Where it is: written on branch `feat/sampler-kernel`, on top of `4e24326`, the v0.1.0 snapshot (the commit
+`feat/inplace-adapter-sync` and `feat/lora-merge-kernel` also start from; the kernel does not depend on either of
+them). Since 2026-11-25 it is also in `main` and `integration`. Every measurement below was taken on the
+`feat/sampler-kernel` build.
 
 | File | What |
 |---|---|
