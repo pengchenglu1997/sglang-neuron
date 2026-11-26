@@ -32,7 +32,7 @@ Open work branches today:
 | Branch | What | State |
 |---|---|---|
 | `fix/compile-cache-stamp-race` | the start-up fix below, on upstream `main` | merged into `main`; kept because upstream draft pull request [#22](https://github.com/sgl-project/sglang-neuron/pull/22) uses it |
-| `feat/sampler-kernel` | the sampler kernel below, on upstream `main` | merged into `main`; kept for a possible upstream pull request |
+| `feat/sampler-kernel` | the sampler kernel below, on upstream `main` | merged into `main`; kept because upstream draft pull request [#25](https://github.com/sgl-project/sglang-neuron/pull/25) uses it |
 | `feat/inplace-adapter-sync` | in-place weight update and LoRA adapter sync | ran on trn2 (Qwen3-0.6B and Qwen3-8B). Not in `main` or `integration`: it and upstream pull request 20 change the same function |
 | `feat/lora-merge-kernel` | LoRA shard-merge NKI kernel, on top of `feat/inplace-adapter-sync`, off by default | first hardware run at Qwen3-0.6B on 2026-11-24; acceptance rule open |
 | `feat/lm-head-pretransposed` | opt-in pre-transposed LM head weight | CPU only; draft pull request to `integration` |
@@ -71,7 +71,14 @@ unless the row says otherwise. Every row, with its conditions and source file, i
 
 - Issue [#15](https://github.com/sgl-project/sglang-neuron/issues/15): in-place weight updates for RL rollout servers,
   with measurements. Upstream pull request 20 now implements the full-checkpoint part.
-- Draft pull request [#22](https://github.com/sgl-project/sglang-neuron/pull/22): the compile-cache start-up fix.
+- Draft pull request [#22](https://github.com/sgl-project/sglang-neuron/pull/22): the compile-cache start-up fix, with
+  the trn2 measurement of 2026-11-24 in its text.
+- A comment on upstream pull request [#20](https://github.com/sgl-project/sglang-neuron/pull/20#issuecomment-7182387872):
+  our trn2 run of its head on Qwen3-0.6B and Qwen3-8B.
+- Issue [#24](https://github.com/sgl-project/sglang-neuron/issues/24): the released `temperature` and `greedy` samplers
+  give different tokens at temperature 0 on 3 of 20 prompts (Qwen3-0.6B, TP4).
+- Draft pull request [#25](https://github.com/sgl-project/sglang-neuron/pull/25): the sampler kernel, with its limits
+  and a question to the maintainers on whether and in what shape they want it.
 
 ## Pull requests to this fork
 
