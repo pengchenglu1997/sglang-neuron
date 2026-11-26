@@ -8,7 +8,7 @@ Upstream is sgl-project/sglang-neuron. Its `main` is one squashed commit (4e2432
 - The authors ran on different hardware. Many ran on trn3. We use trn2, so a trn3 result does not tell us the result on trn2. The column says which one the author used.
 - Decisions:
   - **integrated**: merged into our branch `integration`, in the order given below.
-  - **tracked branch**: kept as its own branch `upstream-pr/<N>`, the unchanged upstream PR head, for reference. Not in `integration`. Branches that stack on another PR say so.
+  - **tracked branch**: the unchanged upstream PR head, read for reference. Not in `integration`. Branches that stack on another PR say so. Changed 2026-11-25: the fork no longer keeps a copy branch `upstream-pr/<N>`; on that date every copy equalled its upstream PR head. Fetch a head with `git fetch https://github.com/sgl-project/sglang-neuron pull/<N>/head:upstream-pr/<N>`; the name `upstream-pr/<N>` in these documents means that head.
   - **not carried**: no branch (PRs 3, 14 and 19). Ideas worth keeping are listed at the end of this file.
 - Reading depth: the decisions for 20, 4, 9, 16, 17 and 18 come from reading the full diff. The others come from the PR text and the file list. Where we only read the text, a later diff read may change the decision. Every number in the "Author reports" column was checked against the PR text on 2026-11-23.
 
@@ -48,7 +48,7 @@ Notes on the table:
 
 ## Merge order for the `integration` branch
 
-`main` is upstream v0.1.0 plus these documents, with no code change. Branch `integration` is `main` plus PRs 20, 4, 9, 16, 17, 18 in that order. Changed 2026-11-25: PR 20 was run by us on its own branch on 2026-11-24 (RESULTS section 8.1), and `integration` was started once on Qwen3-30B-A3B (section 8.7). None of the PRs was run against its own claims on `integration`. Each PR also lives as its own branch `upstream-pr/<N>`, the unchanged upstream PR head.
+Until 2026-11-25 `main` was upstream v0.1.0 plus these documents, with no code change. Changed 2026-11-25: `main` also holds our two changes that ran on hardware (the compile-cache stamp fix and the sampler kernel; see the README), and the unchanged upstream `main` is branch `upstream-main`. Branch `integration` is `main` plus PRs 20, 4, 9, 16, 17, 18 in that order. Changed 2026-11-25: PR 20 was run by us on its own branch on 2026-11-24 (RESULTS section 8.1), and `integration` was started once on Qwen3-30B-A3B (section 8.7). None of the PRs was run against its own claims on `integration`. Each PR also lives as its own branch `upstream-pr/<N>`, the unchanged upstream PR head.
 
 Conflicts to expect, and what to do:
 
