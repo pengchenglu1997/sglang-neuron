@@ -1,0 +1,25 @@
+name: team-pr-label-check
+
+# Fork only. See AGENTS.md rule 6.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  label-check:
+    if: github.repository == 'pengchenglu1997/sglang-neuron'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require exactly one of cpu-only, hardware-verified
+        env:
+          LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+        run: |
+          count=$(echo "$LABELS" | jq '[.[] | select(. == "cpu-only" or . == "hardware-verified")] | length')
+          if [ "$count" -ne 1 ]; then
+            echo "::error::This pull request must carry exactly one of the labels 'cpu-only' or 'hardware-verified' (found $count). See AGENTS.md rule 6."
+            exit 1
+          fi
+          echo "Label check passed."
