@@ -228,7 +228,7 @@ cache was flushed. Nothing was posted to the pull request.
 ### 8.2 Compile-cache stamp race
 
 Hardware, trn2.48xlarge. Two containers started together on one empty shared compile cache, 10 trials per arm. Run
-2026-11-24. File `74_stamp_race_r1.jsonl`. The fix is the branch `fix/compile-cache-stamp-race` (draft pull request 22).
+2026-11-24. File `74_stamp_race_r1.jsonl`. The fix is the branch `fix/compile-cache-stamp-race` (upstream pull request 22; a draft until 2026-11-25, ready for review since).
 
 | Arm | Trials that failed |
 |---|---|
