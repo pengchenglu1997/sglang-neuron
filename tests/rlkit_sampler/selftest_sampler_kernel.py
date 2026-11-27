@@ -12,7 +12,8 @@ group) and a copy of this repository's sglang_neuron/rlkit_sampler_kernel.py. Th
       (this is the noise check: the score includes the Gumbel noise)
   T3  ties (equal maxima in several segments and ranks), constant rows, very negative and -inf logits
   T4  planted faults that MUST be caught: wrong noise column (base + 1), wrong row key, no tie rule (largest id)
-  T5  this repository's sampling.py equals the released one except for the guarded branch (difflib)
+  T5  this repository's sampling.py equals the released one except for the guarded branches (difflib; the second one,
+      of the topk_topp mode, is tested in selftest_sampler_topk.py)
   --sim  (WSL with nki 0.7.0) runs the NKI kernel in nki.simulate on reduced shapes against the reference
 Exit 0 when every test passes. No device, no docker, no network.
 """
@@ -244,8 +245,11 @@ def t5(src_orig: bytes):
     diff = [d for d in difflib.unified_diff(a, b, lineterm="", n=0) if d[:1] in "+-" and d[:3] not in ("+++", "---")]
     removed = [d for d in diff if d.startswith("-")]
     added = [d[1:] for d in diff if d.startswith("+")]
-    guarded = all(("RLKIT" in x or "rlkit" in x or x.strip() in ("",) or "row_keys, top_logprobs)" in x) for x in added)
-    ok = not removed and guarded and len(added) <= 10 and b"\r" not in new
+    # the continuation lines of the two guarded calls (temperature mode; topk_topp mode, selftest_sampler_topk.py)
+    continued = ("row_keys, top_logprobs)",
+                 "logits, group, rank, vocabulary_size, temperatures, row_keys, filters, top_logprobs, candidates)")
+    guarded = all(("RLKIT" in x or "rlkit" in x or x.strip() in ("",) or x.strip() in continued) for x in added)
+    ok = not removed and guarded and len(added) <= 14 and b"\r" not in new
     for d in diff:
         print("   diff " + d)
     return check("T5 patched sampling.py = released + guarded branch only", ok,

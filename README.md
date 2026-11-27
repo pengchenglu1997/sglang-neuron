@@ -37,6 +37,7 @@ Open work branches today:
 | `feat/lora-merge-kernel` | LoRA shard-merge NKI kernel, on top of `feat/inplace-adapter-sync`, off by default | first hardware run at Qwen3-0.6B on 2026-11-24; acceptance rule open |
 | `feat/lm-head-pretransposed` | opt-in pre-transposed LM head weight, on upstream v0.1.0 | CPU only; its draft pull request conflicts with `integration` and is superseded by the branch below |
 | `feat/lm-head-pretransposed-integration` | the same change on `integration`, where the in-place weight reload also writes the LM head's own copy of a tied model | CPU only; pull request to `integration` |
+| `feat/sampler-kernel-topk-topp` | the sampler kernel in the `topk_topp` mode, switch `RLKIT_SAMPLER_KERNEL_TOPK=1`, off by default ([tests/rlkit_sampler/README.md](tests/rlkit_sampler/README.md)) | CPU and NKI simulator only; pull request to `integration` |
 
 To read or run an upstream pull request that is not in `integration`, fetch its head from upstream:
 
