@@ -5,9 +5,8 @@ One NKI kernel that replaces the shard-local stage of the engine's temperature s
 
 Changed 2026-11-26: branch `feat/sampler-kernel-topk-topp` (a `cpu-only` pull request to `integration`) uses the same
 kernel, unchanged, in the `topk_topp` mode behind a second switch, `RLKIT_SAMPLER_KERNEL_TOPK=1`. That part ran in
-the CPU tests and the NKI simulator, and on a device once (2026-11-26, Qwen3-0.6B, TP4; results in
-[docs/rl/RESULTS.md](../../docs/rl/RESULTS.md) section 10). See [topk_topp mode](#topk_topp-mode)
-below. Everything else on this page is about the `temperature` mode.
+the CPU tests and the NKI simulator, and on a device once (2026-11-26, Qwen3-0.6B, TP4; results below).
+See [topk_topp mode](#topk_topp-mode) below. Everything else on this page is about the `temperature` mode.
 
 Where it is: written on branch `feat/sampler-kernel`, on top of `4e24326`, the v0.1.0 snapshot (the commit
 `feat/inplace-adapter-sync` and `feat/lora-merge-kernel` also start from; the kernel does not depend on either of
@@ -142,7 +141,7 @@ and 32. The kernel logs once per process, at the first trace, and that line says
 
 ## Correctness evidence
 
-Files: `82_sampler_kernel_r10.jsonl`, `83_sampler_check2_r11.jsonl`, `82_sampler_kernel_r12.jsonl` (companion repository).
+Files: `82_sampler_kernel_r10.jsonl`, `83_sampler_check2_r11.jsonl`, `82_sampler_kernel_r12.jsonl` (kept with the team tooling, outside the engine tree).
 Hardware, trn2.48xlarge, TP4.
 
 - The line `sampler by the kernel` is in the log of every rank of the kernel server and absent from the released one.
@@ -174,8 +173,8 @@ Hardware, trn2.48xlarge, TP4.
   refused them (HTTP 400), so the sampled check of that run says nothing. `83_sampler_check2.py` sends them correctly
   and gave the sampled results above.
 
-Tests before the hardware run, `tests/rlkit_sampler/selftest_sampler_kernel.py`, WSL with the NKI 0.7.0 simulator and
-CPU torch: 11 of 11 passed (also run again on this branch, same result).
+Tests before the hardware run, `tests/rlkit_sampler/selftest_sampler_kernel.py`, run with the NKI 0.7.0 simulator and CPU
+torch: `python tests/rlkit_sampler/selftest_sampler_kernel.py --sim` (see "Run it" below).
 - T1: against the released `sample_sharded_logits` over a simulated TP4 group, same token ids and logprobs within 1e-5,
   rows 1 / 8 / 32, temperatures 0 / 0.6 / 1.0 and mixed.
 - T2: per-chunk best score bit-equal to the engine's, noise included.
@@ -225,7 +224,7 @@ the CPU and simulator results of the first version are recorded in the team hub,
 a device once, on 2026-11-26 (below).
 
 Hardware, 2026-11-26, Qwen3-0.6B, TP4, temperature 0, 20 prompts one at a time, 48 tokens, 20 top logprobs, one run
-each (details and files: [docs/rl/RESULTS.md](../../docs/rl/RESULTS.md) section 10):
+each:
 - Before the fix, the kernel path applied the padded-vocabulary mask only when a column is padded; the released path
   always does. Qwen3-0.6B at TP4 has no padded column. Kernel on against kernel off: first-token logprob bit-equal on
   0 of 20 prompts, same token sequences on 14 of 20.
@@ -324,8 +323,8 @@ kernel, released greedy; checks and benchmarks; Qwen3-0.6B), `83_sampler_check2.
 controls), `84_sampler_kernel_8b.py` (the same as 82 on Qwen3-8B), `85_sampler_topk_hw.py` (the `topk_topp` path, not run yet; it
 imports 82 and mounts `patches/sglang_neuron_v0.1.0_sampler_kernel_topk/` holding `sampling.py`,
 `rlkit_sampler_kernel.py` and `rlkit_sampler_topk.py`). They are not self-contained. They import the launcher
-kit of the companion repository, [pengchenglu1997/trainium-sglang-rl](https://github.com/pengchenglu1997/trainium-sglang-rl)
-(`81_opt_sweep.py`, `server_ctl.py`, `rl_common.py`, `rollout_client.py`, `backends.json`, `srv_sglang_neuron.sh`,
-`22b_llmbench_grid.sh`, and the scripts these call), which is not copied here. Put them in that kit's folder, with the two
+kit of the team tooling (`81_opt_sweep.py`, `server_ctl.py`, `rl_common.py`, `rollout_client.py`, `backends.json`, `srv_sglang_neuron.sh`,
+`22b_llmbench_grid.sh`, and the scripts these call). The hardware scripts used for the runs are team tooling kept outside the engine tree and are
+not copied here. Put them in that kit's folder, with the two
 changed package files under `patches/sglang_neuron_v0.1.0_sampler_kernel/` (`sampling.py`, `rlkit_sampler_kernel.py`,
 the paths relative to `sglang_neuron/`); `82_sampler_kernel_hw.py` mounts that folder over the installed package.
