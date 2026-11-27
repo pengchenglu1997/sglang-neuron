@@ -1,0 +1,16 @@
+# Review tiers of the fork (tier numbers: the repository layout specification, section 7).
+# The last matching line wins. This file only takes effect once the repository setting
+# "require review from Code Owners" is on; that setting is changed separately by the lead.
+#
+# Tier 2: every path needs one approval from a code owner other than the author.
+# Teammate accounts are added to this line when the settings are applied.
+*                     @pengchenglu1997
+#
+# Tier 3: the lead alone.
+/AGENTS.md            @pengchenglu1997
+/rl/METHOD.md         @pengchenglu1997
+/rl/best.tsv          @pengchenglu1997
+/.github/workflows/   @pengchenglu1997
+/.github/CODEOWNERS   @pengchenglu1997
+#
+# Tier 1 (regenerated README blocks only) is not a path rule and has no line here.

@@ -1,0 +1,5 @@
+# Accepted hits of the public-content checks, repository-wide. One line per entry:
+#   <path><TAB><pattern name><TAB><reason>
+# The path is relative to the repository root. The pattern name is one of scrub_check.py's, or public-cpu-lint
+# (check_docs.py f4, accepts a whole file). An entry needs a reason; adding one is a tier-2 change.
+.github/workflows/team-checks.yml	user-at-host	uses: lines pin GitHub actions as name@tag, not a user at a host

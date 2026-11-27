@@ -1,0 +1,21 @@
+[
+  {"name": "team-only into main, no label", "base": "main", "labels": [], "paths": ["rl/tools/check_pr.py", "docs/rl/RESULTS.md"], "expect": "pass", "reason": "team-only"},
+  {"name": "team-only into main, one label is harmless", "base": "main", "labels": ["cpu-only"], "paths": [".github/workflows/x.yml"], "expect": "pass", "reason": "team-only"},
+  {"name": "team-only into integration", "base": "integration", "labels": [], "paths": ["rl/README.md"], "expect": "fail", "reason": "must target main"},
+  {"name": "team-only with both labels", "base": "main", "labels": ["cpu-only", "hardware-verified"], "paths": ["README.md"], "expect": "fail", "reason": "both"},
+  {"name": "engine, no label, main", "base": "main", "labels": [], "paths": ["sglang_neuron/sampling.py"], "expect": "fail", "reason": "exactly one"},
+  {"name": "engine, no label, integration", "base": "integration", "labels": ["bug"], "paths": ["sglang_neuron/sampling.py"], "expect": "fail", "reason": "exactly one"},
+  {"name": "engine, both labels", "base": "integration", "labels": ["cpu-only", "hardware-verified"], "paths": ["sglang_neuron/sampling.py"], "expect": "fail", "reason": "both"},
+  {"name": "engine cpu-only into main", "base": "main", "labels": ["cpu-only"], "paths": ["sglang_neuron/sampling.py"], "expect": "fail", "reason": "never main"},
+  {"name": "engine cpu-only into integration", "base": "integration", "labels": ["cpu-only"], "paths": ["sglang_neuron/sampling.py"], "expect": "pass", "reason": "label cpu-only"},
+  {"name": "engine hardware-verified into main", "base": "main", "labels": ["hardware-verified"], "paths": ["sglang_neuron/sampling.py", "rl/data/x/README.md"], "expect": "pass", "reason": "label hardware-verified"},
+  {"name": "engine hardware-verified into integration", "base": "integration", "labels": ["hardware-verified"], "paths": ["sglang_neuron/sampling.py"], "expect": "pass", "reason": "label hardware-verified"},
+  {"name": "tests/ is engine", "base": "main", "labels": [], "paths": ["tests/cpu/test_x.py"], "expect": "fail", "reason": "exactly one"},
+  {"name": "docs outside docs/rl is engine", "base": "main", "labels": [], "paths": ["docs/guides/reference-configuration.md"], "expect": "fail", "reason": "exactly one"},
+  {"name": "nested README.md is engine", "base": "main", "labels": [], "paths": ["tests/rlkit_sampler/README.md"], "expect": "fail", "reason": "exactly one"},
+  {"name": "rl-lookalike folder is engine", "base": "main", "labels": [], "paths": ["url/x.py", "rlkit/x.py"], "expect": "fail", "reason": "exactly one"},
+  {"name": "pyproject.toml is engine", "base": "main", "labels": [], "paths": ["pyproject.toml"], "expect": "fail", "reason": "exactly one"},
+  {"name": "no changed path, no label", "base": "main", "labels": [], "paths": [], "expect": "fail", "reason": "exactly one"},
+  {"name": "other base keeps the old rule: no label", "base": "upstream-main", "labels": [], "paths": ["rl/README.md"], "expect": "fail", "reason": "exactly one"},
+  {"name": "other base keeps the old rule: one label", "base": "feat/x", "labels": ["cpu-only"], "paths": ["sglang_neuron/a.py"], "expect": "pass", "reason": "label is present"}
+]

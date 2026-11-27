@@ -1,0 +1,108 @@
+name: team-checks
+
+# Fork only. Replaces team-pr-label-check. The rules and their checks: rl/tools/ (check_pr.py, check_docs.py,
+# check_data.py, scrub_check.py, upstream_ready.sh) and their fixtures in rl/tools/tests/.
+#   F1  label derived from the base and the changed paths   required (fails the job)
+#   F9  selftests of the tools                              required (fails the job)
+#   F2-F8, F10                                              report mode: printed as warnings, the job never fails
+# F5 (generated blocks) has no tool yet: best.py and switches.py arrive with rl/best.tsv.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  f1-label-rule:
+    name: F1 label rule
+    if: github.repository == 'pengchenglu1997/sglang-neuron'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: F1 label from base and paths
+        env:
+          LABELS_JSON: ${{ toJson(github.event.pull_request.labels.*.name) }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -eu
+          labels=$(printf '%s' "$LABELS_JSON" | jq -r 'join(",")')
+          git diff --name-only -z --no-renames "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/paths.z"
+          echo "base=$BASE_REF labels=[$labels] changed paths=$(tr -cd '\0' < "$RUNNER_TEMP/paths.z" | wc -c)"
+          python rl/tools/check_pr.py f1 --base "$BASE_REF" --labels "$labels" --paths-file "$RUNNER_TEMP/paths.z" \
+            || { echo "::error::F1: label rule failed. See AGENTS.md rule 6 and rl/tools/check_pr.py."; exit 1; }
+
+  f9-selftests:
+    name: F9 selftests
+    if: github.repository == 'pengchenglu1997/sglang-neuron'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Tool tests (fixtures, replay of pull requests 3, 13 and 15, upstream_ready.sh)
+        run: python -m unittest discover -s rl/tools/tests -p 'test_*.py' -v
+      - name: rl/selftest_*.py (none before the import of rl/)
+        run: |
+          set -eu
+          n=0
+          for f in rl/selftest_*.py; do
+            [ -e "$f" ] || continue
+            n=$((n + 1))
+            echo "== $f"
+            python "$f"
+          done
+          echo "selftest scripts run: $n"
+
+  report:
+    name: F2-F8 and F10 report
+    if: github.repository == 'pengchenglu1997/sglang-neuron'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Report-mode checks (printed, never failing)
+        env:
+          LABELS_JSON: ${{ toJson(github.event.pull_request.labels.*.name) }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -u
+          T=rl/tools
+          labels=$(printf '%s' "$LABELS_JSON" | jq -r 'join(",")')
+          git diff --name-only -z --no-renames "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/paths.z"
+          git diff --name-only -z --no-renames --diff-filter=d "$BASE_SHA...$HEAD_SHA" \
+            | python $T/check_pr.py classify --kind team > "$RUNNER_TEMP/team_files.txt"
+          printf '%s' "$PR_BODY" > "$RUNNER_TEMP/body.txt"
+          step() { name="$1"; shift; echo "::group::$name"; if "$@"; then echo "$name: ok"; else echo "::warning::$name would fail (report mode)"; fi; echo "::endgroup::"; }
+          step "F2 hardware evidence" python $T/check_pr.py f2 --labels "$labels" --paths-file "$RUNNER_TEMP/paths.z" --body-file "$RUNNER_TEMP/body.txt" --head "$HEAD_SHA" --main origin/main
+          step "F3 scrub of changed team files" python $T/scrub_check.py --files-from "$RUNNER_TEMP/team_files.txt" --allow $T/scrub_allow.txt
+          step "F4 public CPU lint" python $T/check_docs.py f4
+          if [ -e $T/best.py ]; then
+            step "F5 generated blocks" python $T/best.py --check README.md docs/rl/RESULTS.md
+          else
+            echo "F5 generated blocks: not checked, rl/tools/best.py and switches.py do not exist yet"
+          fi
+          step "F6 data folders" python $T/check_data.py --base "$BASE_SHA" --head "$HEAD_SHA"
+          step "F7 links and paths" python $T/check_docs.py f7
+          step "F8 state wording on added lines" python $T/check_docs.py f8 --base "$BASE_SHA" --head "$HEAD_SHA"
+          step "F10 engine files do not mention rl/" python $T/check_docs.py f10
+          exit 0
