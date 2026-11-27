@@ -5,8 +5,8 @@ The headline numbers and what they are compared with: the block in section 9, pr
 
 How to read this file:
 
-- Every number has a source file under [`rl/data/`](../../rl/data/) and a tier (rules: [`rl/METHOD.md`](../../rl/METHOD.md) section 1).
-  `screen` is at least 2 passes on one server start per arm, in one session. `single run` is one pass or one start: a
+- Every number has a tier and, except where the text says its source is not published, a source file under [`rl/data/`](../../rl/data/) (rules: [`rl/METHOD.md`](../../rl/METHOD.md) section 1).
+  `screen` is at least 2 passes on one server start per arm, in one session. `once` is one pass or one start: a
   record, not a claim. A difference of less than 10 percent is written "not distinguished at screen tier".
 - A row names the model, the layout, what was measured, the number, the condition and the source file. Nothing here is a
   cost-normalised comparison.
@@ -24,7 +24,7 @@ Loop: `rl/30_rl_loop.py`, GRPO-style policy gradient with a LoRA trainer, GSM8K.
 8 rollout servers at TP4, a 16-process data-parallel trainer, adapter sync through `update_weights_from_disk` into the
 patched server (in place), 32 questions x 8 answers per step, up to 256 new tokens, temperature 0.7, learning rate 1e-4,
 150 steps, not overlapped. Result files `rl/data/2026-11-20/trn2_seeds/30_rl_loop_plain_s{2,3,4}.jsonl`, run 2026-11-20.
-Tier: single run per seed (three seeds). Figures are medians over the 150 step rows of each seed.
+Tier: once per seed (three seeds). Figures are medians over the 150 step rows of each seed.
 
 | What | Seed 2 | Seed 3 | Seed 4 | Note |
 |---|---|---|---|---|
@@ -37,7 +37,7 @@ Tier: single run per seed (three seeds). Figures are medians over the 150 step r
 | greedy accuracy, 500 GSM8K questions, before | 0.572 | 0.574 | 0.572 | |
 | greedy accuracy, after step 150 | 0.712 | 0.728 | 0.702 | evaluated every 25 steps; the seven values per seed are in the files |
 
-Other rows from the same loop files and the plan (tier: single run each):
+Other rows from the same loop files and the plan (tier: once each):
 
 | Model | Layout | What | Number | Condition | Date | Source |
 |---|---|---|---|---|---|---|
@@ -55,7 +55,7 @@ Sampler: by the scripts (`rl/srv_sglang_neuron.sh` defaults to `temperature`; `r
 Our in-place update patch (branch `feat/inplace-adapter-sync` of this fork, on SGLang-Neuron v0.1.0), trn2, TP4, context 1024,
 one decode bucket of 32. Script `rl/48_inplace_server_test.py`, result files `rl/data/2026-11-21_night/48_inplace_*.jsonl`, run
 2026-11-21. The test compares the server after an in-place update with a fresh start on the same weights, by text and
-token logprobs. Tier: single run. Source of the table: `rl/docs/NIGHT_RECORD_2026-11-21.md` section 2.
+token logprobs. Tier: once. Source of the table: `rl/docs/NIGHT_RECORD_2026-11-21.md` section 2.
 
 | Model | Graph | Live tensors covered | In-place full update | Back to base | In place vs fresh start |
 |---|---|---|---|---|---|
@@ -76,7 +76,7 @@ token logprobs. Tier: single run. Source of the table: `rl/docs/NIGHT_RECORD_202
 ## 3. Adapter update at Qwen3-8B
 
 Script `rl/50_adapter_server_test.py`, result file `rl/data/2026-11-21_night/50_adapter_q8.jsonl`, run 2026-11-21. Qwen3-8B,
-TP4, rank 16 on seven projections, host-merge path (no kernel). Tier: single run. Source: `rl/docs/NIGHT_RECORD_2026-11-21.md` section 4.
+TP4, rank 16 on seven projections, host-merge path (no kernel). Tier: once. Source: `rl/docs/NIGHT_RECORD_2026-11-21.md` section 4.
 
 | What | Number | Note |
 |---|---|---|
@@ -115,7 +115,7 @@ the loop's configuration has no measured speed here ([KERNELS.md](KERNELS.md) se
 
 Qwen3-0.6B, TP4, 32 requests of up to 256 tokens, run 2026-11-21. Sampler `temperature` with no top logprobs (the
 launcher defaults; `59_decode_profile.py` sets neither), so by the code the decode was compiled at `-O2`; not read back
-from the server log. Tier: single run. Source: `rl/docs/NIGHT_RECORD_2026-11-21.md` section 5; files
+from the server log. Tier: once. Source: `rl/docs/NIGHT_RECORD_2026-11-21.md` section 5; files
 `59_decode_profile_p1.jsonl`, `59b_profile_sum.txt`, `59d_devprof_sum.txt` in `rl/data/2026-11-21_night/`.
 
 | What | Number | Condition |
@@ -137,7 +137,7 @@ compiler metrics. Per-operation attribution is not in the record; our computatio
 
 Qwen3-0.6B, TP4, context ladder off, `rl/60_shape_cost.py`, files `rl/data/2026-11-21_night/60_shape_cost_{A,B,C,D}.jsonl`, run
 2026-11-21. Step = wall time divided by the longest answer. Same GSM8K questions at every level; answers up to 256 tokens.
-Tier: single run. Source: `rl/docs/NIGHT_RECORD_2026-11-21.md` section 6.
+Tier: once. Source: `rl/docs/NIGHT_RECORD_2026-11-21.md` section 6.
 
 | Concurrent requests | A: one bucket (32), context 1024 | B: default buckets, context 1024 | C: one bucket, context 4096 | D: one bucket, context 8192 |
 |---|---|---|---|---|
@@ -185,7 +185,7 @@ Run conditions that bear on the numbers:
 - Many runs went on at the same time on other chips of the same machine. Repeats on a quieter machine agreed within 1
   percent (released defaults, greedy sampler, sampler kernel with `--dp-size 4`).
 - Every throughput cell is one run of 64 requests on one server start, 256 output tokens, unless the row says more (tier:
-  single run). Throughput is total output tokens over the wall time of the batch (llmbench at commit 08f4163, column
+  once). Throughput is total output tokens over the wall time of the batch (llmbench at commit 08f4163, column
   `output_token_throughput_tps`). TTFT is the median time to the first streamed chunk.
 - The first hardware test of the sampler kernel sent sampled requests without `top_p 1, top_k -1, min_p 0`. The
   `temperature` sampler refused them with HTTP 400. The check script was changed to send them; the results below are from
@@ -197,7 +197,7 @@ Hardware, trn2.48xlarge, TP4. Three files of branch `upstream-pr/20` (`general_p
 `models/transformer/model.py`) over the v0.1.0 image; the md5 of each file is recorded in each result file. Launch flags:
 `--context-length 1024 --chunked-prefill-size 1024 --max-running-requests 32 --max-total-tokens 32768
 --cuda-graph-bs-decode 32`. The check compares answers and token logprobs of 20 prompts, 48 new tokens each (960 tokens).
-Run 2026-11-24. Files `75_pr20_check_pr20_q06.jsonl`, `75_pr20_check_pr20_q8.jsonl`. Tier: single run.
+Run 2026-11-24. Files `75_pr20_check_pr20_q06.jsonl`, `75_pr20_check_pr20_q8.jsonl`. Tier: once.
 
 | What | Qwen3-0.6B | Qwen3-8B |
 |---|---|---|
@@ -231,7 +231,7 @@ near 1 in 10, 0 of 10 does not prove the fix by itself. The fix removes the equa
 ### 8.3 Baseline pair: vllm-neuron and SGLang-Neuron
 
 Hardware, trn2.48xlarge, one chip, TP4. Qwen3-0.6B, prompt 1024 tokens, 256 output tokens, 64 requests per cell, one run
-per cell. Cell: tok/s / TTFT p50. Run 2026-11-24. Tier: single run, except the repeat pass named below (screen).
+per cell. Cell: tok/s / TTFT p50. Run 2026-11-24. Tier: once, except the repeat pass named below (screen).
 
 - vllm-neuron 0.29.0.1.2.0: TP4, max-model-len 4096, max-num-seqs 32.
 - SGLang-Neuron v0.1.0 released defaults: the image's example script `qwen3_0p6b/run_server.sh` with its own flags
@@ -251,7 +251,7 @@ row: tok/s within 0.2 percent for both engines (at concurrency 32: 2,375.3 and 2
 (`77_pair_q06d.md`). The order of the two engines changes with concurrency in this table, and the two engines are not
 distinguished at screen tier at concurrency 32.
 
-Qwen3-8B, prompt 1024, 256 output tokens, SGLang-Neuron v0.1.0 released defaults (file `77_pair_q8.md`; tier: single run
+Qwen3-8B, prompt 1024, 256 output tokens, SGLang-Neuron v0.1.0 released defaults (file `77_pair_q8.md`; tier: once
 with a repeat pass):
 
 | Concurrency | tok/s | TTFT p50 | Repeat pass tok/s |
@@ -270,7 +270,7 @@ it caused the 2026-11-24 failures was not checked. On an empty cache folder vllm
 ### 8.4 Serving changes, Qwen3-0.6B
 
 Hardware, trn2.48xlarge, Qwen3-0.6B, prompt 1024, 256 output tokens, run 2026-11-24. Cell: tok/s at concurrency 1 / 8 /
-32, one run per cell unless the row says more (tier: single run). "Text" is the answer to five fixed prompts at temperature 0 (48 tokens)
+32, one run per cell unless the row says more (tier: once). "Text" is the answer to five fixed prompts at temperature 0 (48 tokens)
 against the released-defaults server. Files `opt_sweep_r9.md`, `81_opt_sweep_r9.jsonl`.
 
 Changes that moved the numbers:
@@ -288,7 +288,7 @@ At concurrency 32 the rows `greedy` (2,782), 4 containers of TP1 (2,756) and 2 c
 reference by 10 percent or more; `topk_topp` (2,607) and `--dp-size 4` (2,701) are not distinguished from it at single-run
 tier. The concurrency-1 cell of a replica layout is one replica alone, which is why it is lower than the TP4 cell.
 
-Not distinguished from the released defaults (single run per cell, below screen tier):
+Not distinguished from the released defaults (once per cell, below screen tier):
 
 | Change | tok/s at 1 / 8 / 32 | TTFT p50 at 32 | Text |
 |---|---|---|---|
@@ -317,7 +317,7 @@ Speed, prompt 1024, 256 output tokens, tok/s at concurrency 1 / 8 / 32, two pass
 |---|---|---|
 | released `temperature` sampler | 211 / 1,160 / 2,455 and 211 / 1,171 / 2,454 | 109 / 604 / 1,421 and 110 / 607 / 1,426 |
 | sampler kernel | 319 / 1,624 / 2,730 and 319 / 1,636 / 2,734 | 114 / 642 / 1,489 and 114 / 647 / 1,496 |
-| released `greedy` sampler (one pass: single run) | 311 / 1,608 / 2,781 | 113 / 639 / 1,533 |
+| released `greedy` sampler (one pass: once) | 311 / 1,608 / 2,781 | 113 / 639 / 1,533 |
 
 At 0.6B the kernel is 10 percent or more above the released `temperature` sampler at all three concurrencies (at 32: 2,730
 and 2,734 against 2,455 and 2,454). At 8B the kernel is 4.5 to 6.6 percent above over the six cells of the table (from the
@@ -334,7 +334,7 @@ tokens, three passes (file `55_rollout_bench_roll_*.jsonl`; tier: screen).
 
 Pass by pass the kernel is 8.3, 6.4 and 8.2 percent above: not distinguished at screen tier. The rollout is not a full RL loop.
 
-Combinations at Qwen3-0.6B (files `opt_sweep_r13.md`, `opt_sweep_r15.md`, `opt_sweep_r16.md`; tier: single run):
+Combinations at Qwen3-0.6B (files `opt_sweep_r13.md`, `opt_sweep_r15.md`, `opt_sweep_r16.md`; tier: once):
 
 | Server | tok/s at 1 / 8 / 32 | TTFT p50 at 32 |
 |---|---|---|
@@ -346,7 +346,7 @@ Combinations at Qwen3-0.6B (files `opt_sweep_r13.md`, `opt_sweep_r15.md`, `opt_s
 For comparison, the released `temperature` sampler with `--dp-size 4` gave 192 / 1,172 / 2,701 (section 8.4), and with 4
 containers of TP1 192 / 1,189 / 2,756. Logical-core configuration 1 with 8 replicas on one chip was refused by the engine
 at start (`set_logical_nc_config`; this model's layout runs with 2).
-Correctness evidence (files `82_sampler_kernel_r10.jsonl`, `82_sampler_kernel_r12.jsonl`, `83_sampler_check2_r11.jsonl`; single run each):
+Correctness evidence (files `82_sampler_kernel_r10.jsonl`, `82_sampler_kernel_r12.jsonl`, `83_sampler_check2_r11.jsonl`; once each):
 
 - The log line "sampler by the kernel" is in the log of every rank of the kernel server and absent from the released one.
 - Qwen3-0.6B, temperature 0, 20 prompts. Two released `temperature` servers agree bit for bit. The released `temperature`
@@ -376,7 +376,7 @@ and Qwen3-8B only; not run inside a full RL loop; the released and kernel sequen
 Hardware, trn2.48xlarge, run 2026-11-24. The kernel is on branch `feat/lora-merge-kernel`, run through the patched server
 with `RLKIT_DEVICE_WRITE=kernel`, `RLKIT_KERNEL_IMPL=nki`, `RLKIT_KERNEL_CHECK=all`, fp32 factors. NKI 0.7.0. The
 step-1 bench ran on one core of the same NUMA node as other runs of the session. This is the first run of this kernel on
-hardware. It is not called validated here. Tier: single run.
+hardware. It is not called validated here. Tier: once.
 
 Step H1 (`tests/rlkit/hw_merge_kernel_bench.py`, one core, eager call; files `78_kernel_h1.jsonl`,
 `73_merge_kernel_bench.jsonl`): the kernel can be called on a NeuronCore outside a serving graph, eager and compiled. The
@@ -408,7 +408,7 @@ checkpoint merged by the kernel itself, did not run). It was not timed at Qwen3-
 ### 8.7 Qwen3-30B-A3B start probe
 
 Hardware, trn2.48xlarge, TP4 EP4, our `integration` branch (which carries upstream PRs 17 and 18), run 2026-11-24. One
-probe, not a baseline; tier: single run. The server was ready after 2,770 s (cold compile cache). The prompt "17 * 23" was
+probe, not a baseline; tier: once. The server was ready after 2,770 s (cold compile cache). The prompt "17 * 23" was
 answered 391. One cell: prompt 1024, concurrency 8, 256 output tokens, 32 requests: 153 tok/s, TTFT p50 0.508 s (file
 `80_moe30b_r8.jsonl`, `llmbench_moe30b_r8.csv`). No other cell, no comparison with the PRs switched off.
 
@@ -467,7 +467,7 @@ Reading (screen tier; differences below 10 percent are not distinguished):
 Correctness, switch 0 against switch 1, both with the kernel (method of section 8.5: 20 fixed prompts, at most 48 new tokens
 (`max_tokens` 48; on Qwen3-0.6B 6 prompts and on Qwen3-8B 1 prompt end earlier at the end of the sequence, so 860 and
 932 tokens are compared), temperature 0, one request at a time; a fork is the first position where the tokens differ,
-logprob differences are taken before a fork; files `lm_head/cc/results/`, comparison lines in `tables.txt` section 4; tier: single run):
+logprob differences are taken before a fork; files `lm_head/cc/results/`, comparison lines in `tables.txt` section 4; tier: once):
 
 | Check | Qwen3-0.6B | Qwen3-8B |
 |---|---|---|
@@ -480,7 +480,7 @@ The log line "sampler by the kernel" is in the log of every rank of each server 
 one per rank) and absent from the logs of the no-kernel servers, their compile starts included.
 
 Start-up, seconds to ready (cold: empty compile cache, four servers compiling at once on four chips; warm: the
-benchmark start from the server's own cache; the warm column is in `tables.txt` section 2; tier: single run):
+benchmark start from the server's own cache; the warm column is in `tables.txt` section 2; the cold column comes from server logs that are not published; tier: once):
 
 | Server | Cold | Warm |
 |---|---|---|
@@ -524,7 +524,7 @@ Conditions for every row of this section:
 
 The kernel path applied the vocabulary mask only when a padded column exists, the released path always. At temperature 0
 (20 prompts, one at a time, 48 tokens, 20 top logprobs, thinking off), kernel on against kernel off, one server each
-(`cmp_r1_koff_kon.txt`; tier: single run):
+(`cmp_r1_koff_kon.txt`; tier: once):
 
 | What | Kernel on against kernel off |
 |---|---|
@@ -545,7 +545,7 @@ tier: screen), are from before the fix and are not comparable with the table in 
 ### 10.2 With the mask applied on the kernel path
 
 Same 20 prompts and settings, kernel on against kernel off, both servers running the file with the mask always applied
-(`cmp_r3_koff_mask_kon_mask.txt`; tier: single run):
+(`cmp_r3_koff_mask_kon_mask.txt`; tier: once):
 
 | What | Kernel on against kernel off |
 |---|---|
@@ -581,7 +581,7 @@ prompts. What it does not show:
 
 llmbench, prompt 1024 tokens, 256 output tokens (`ignore_eos`), 64 requests per cell after 4 warm-up requests, streaming
 `/v1/completions`; output tokens per second. Pass "top-k 50" is temperature 0.8, top-k 50, top-p 0.95, run twice on
-one server start (tier: screen); "no filter" is temperature 0.8, top-k off, top-p 1, min-p 0, run once (tier: single run).
+one server start (tier: screen); "no filter" is temperature 0.8, top-k off, top-p 1, min-p 0, run once (tier: once).
 Kernel on and kernel off ran on separate sets of 4 cores, started together, and the two benchmarks ran interleaved: by the
 recorded request start times, 5 of the 6 concurrency-32 cells overlapped a concurrency-1 cell of the other server
 (`llmbench_b_…_kon_*.csv`, `llmbench_b_…_koff_*.csv`, and their raw per-request files in `i37_topk_kernel/extra/i37x/bench/`).

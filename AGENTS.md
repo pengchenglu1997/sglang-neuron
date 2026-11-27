@@ -11,7 +11,7 @@ gh repo fork pengchenglu1997/sglang-neuron --clone=false    # once per account; 
 gh repo clone pengchenglu1997/sglang-neuron -- --filter=blob:none && cd sglang-neuron   # origin = the team fork
 git remote add upstream https://github.com/sgl-project/sglang-neuron   # skip it if gh added it
 git remote add mine https://github.com/<you>/sglang-neuron.git; git config user.email <id>+<you>@users.noreply.github.com   # mine: push here only
-git fetch origin upstream && bash rl/tools/fork_state.sh     # branches, pull requests, our upstream pull requests, mirror
+git fetch --multiple origin upstream && bash rl/tools/fork_state.sh     # branches, pull requests, our upstream pull requests, mirror
 ```
 
 State is read, never written here. A command and a document that disagree: on a fact the command wins; on a permission the stricter applies.
@@ -22,8 +22,8 @@ State is read, never written here. A command and a document that disagree: on a 
 |---|---|---|---|
 | reproduce a number | `rl/REPRODUCE.md` | `python rl/make_patch_dir.py --ref <commit> --out <dir>`, then the commands there | each server launch needs a human yes in this session |
 | best numbers, switches, how a result was measured | `rl/METHOD.md`; `rl/data/<session>/README.md` | `python rl/tools/best.py`; `python rl/tools/switches.py` | - |
-| change engine code | section 3 | `gh pr create -R pengchenglu1997/sglang-neuron --base main --head <you>:<branch>` | the label: the lead sets it |
-| add session data | section 5 | `python rl/tools/check_data.py rl/data/<session>` | - |
+| change engine code | section 3 (`<base>` is `integration` when it did not run on a device, else `main`) | `gh pr create -R pengchenglu1997/sglang-neuron --base <base> --head <you>:<branch>` | the label: the lead sets it |
+| add session data | section 5 | `python rl/tools/check_data.py --base origin/main --head HEAD` | - |
 | prepare an upstream pull request | section 4 | `bash rl/tools/upstream_ready.sh <branch>` | any upstream push, pull request, comment or body edit: the lead's yes |
 | change `rl/METHOD.md`, `rl/best.tsv`, `rl/tools/`, `.github/`, this file | - | - | the lead decides |
 

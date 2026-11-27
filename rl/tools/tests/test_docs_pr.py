@@ -117,7 +117,7 @@ class IntegrationLines(unittest.TestCase):
             integration = r.commit("integration")
             r.git("checkout", "-q", "main")
             r.write("docs/rl/K.md", "one\nThe top-k kernel ran on a device once at Qwen3-0.6B and in two passes.\n"
-                    "The kernel ran on a device once at Qwen3-0.6B (tier: single run).\n")
+                    "The kernel ran on a device once at Qwen3-0.6B (tier: once).\n")
             head = r.commit("head")
             code, out, err = run([LINES, "--main", main, "--integration", integration, "--head", head, "--repo", r.dir], r.dir)
             self.assertEqual(code, 0, out + err)
@@ -151,6 +151,27 @@ class GeneratedBlocksOfTheRealDocs(unittest.TestCase):
         self.assertLessEqual(len(text.splitlines()), 80)
         for needle in ("exactly one label", "hardware-verified", "cpu-only", "sync from `main`", "check F1"):
             self.assertIn(needle, text)
+
+    def test_agents_commands_are_runnable_as_written(self):
+        text = self.read("AGENTS.md")
+        self.assertIn("git fetch --multiple origin upstream", text)  # "git fetch origin upstream" reads upstream as a ref
+        self.assertNotIn("check_data.py rl/data", text)              # check_data.py takes --base and --head only
+        self.assertIn("check_data.py --base origin/main --head HEAD", text)
+        self.assertNotIn("--base main --head", text)                 # a cpu-only change targets integration
+        code, out, err = run([os.path.join(helpers.TOOLS, "check_data.py"), "--help"], ROOT)
+        self.assertIn("--base", out + err)
+
+    def test_one_tier_word_and_no_cpu_quantity_in_kernels(self):
+        for rel in ("docs/rl/RESULTS.md", "docs/rl/KERNELS.md"):
+            self.assertNotIn("single run", self.read(rel), rel)
+        self.assertIn("**`once`**", self.read("rl/METHOD.md"))
+        self.assertNotIn("1e-5", self.read("docs/rl/KERNELS.md"))
+
+    def test_team_checks_job_fails_only_for_base_main(self):
+        text = self.read(".github/workflows/team-checks.yml")
+        self.assertIn('[ "$BASE_REF" != main ]', text)
+        self.assertLess(text.index('[ "$BASE_REF" != main ]'), text.rindex('exit "$fail"'))
+        self.assertNotIn("test_docs_blocks", text)
 
     def test_no_hand_written_state_table_is_left_in_the_readme(self):
         text = self.read("README.md")

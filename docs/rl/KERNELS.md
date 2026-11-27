@@ -11,7 +11,7 @@ Read this first:
   sampler (section 2). The same kernel in the `topk_topp` mode is on `integration` and ran at Qwen3-0.6B (section 2,
   RESULTS.md section 10).
 - Every number has a condition and a source file. Numbers marked "estimate" are not measurements. A "target" is a
-  target, with its basis. Tier of every measured number: `screen` or `single run` ([`rl/METHOD.md`](../../rl/METHOD.md) section 1);
+  target, with its basis. Tier of every measured number: `screen` or `once` ([`rl/METHOD.md`](../../rl/METHOD.md) section 1);
   a table says which.
 - Measured results that do not involve a kernel are in [RESULTS.md](RESULTS.md). Sections 3 and 4 record what was
   looked at and not taken, so nobody repeats the search.
@@ -32,7 +32,7 @@ prefill step costs what it cost before.
 At Qwen3-8B, TP4, rank 16 on q, k, v, o, gate, up and down, an adapter update on a running server takes 13.9-14.0 s in
 steady state (first update 35.8 s). Of that, 13.5-13.6 s is forming the delta matrices on the host and 0.3 s is the
 copy to the device. A full-checkpoint in-place update at 8B takes 4.7-6.2 s, so at 8B the adapter path is slower than
-the full path. (Source: `rl/docs/NIGHT_RECORD_2026-11-21.md` section 4; tier: single run.)
+the full path. (Source: `rl/docs/NIGHT_RECORD_2026-11-21.md` section 4; tier: once.)
 
 ### Design in short
 
@@ -89,8 +89,7 @@ check, without a device and without timing:
 
 What these tests do not show:
 
-- The output is "one bf16 rounding of an fp32 sum", not "the exact sum rounded once". About 1e-5 to 1e-4 of entries
-  differ from the exact rounding, mostly by 1 unit.
+- The output is "one bf16 rounding of an fp32 sum", not "the exact sum rounded once".
 - `test_host_kernel_path.py` is not a server run. SGLang is not installed in that environment, so the plugin's own CPU
   mode was not run.
 - Not done: a compile-only run with `neuronx-cc`; the call through torch (`wrap_nki`); reading a real PEFT adapter
@@ -102,7 +101,7 @@ What these tests do not show:
   (`rl/patches/PR_DRAFT_inplace_weight_update.md`). The cause was not found. The kernel's own hardware run (below) shows a
   difference of the same kind.
 
-### Hardware (tier: single run)
+### Hardware (tier: once)
 
 Hardware: trn2.48xlarge (Trainium2), NKI 0.7.0, SGLang-Neuron v0.1.0 image. Full tables and conditions: RESULTS.md section 8.6.
 
@@ -132,7 +131,7 @@ only from rounding of the merged weights or also from the in-place write.
 
 | Quantity (Qwen3-8B, TP4, rank 16 on seven projections) | Measured | Target (proposed) |
 |---|---|---|
-| adapter swap, steady state | 13.9 s (host merge, `rl/data/2026-11-21_night/50_adapter_q8.jsonl`; tier: single run) | at most 1.5 s |
+| adapter swap, steady state | 13.9 s (host merge, `rl/data/2026-11-21_night/50_adapter_q8.jsonl`; tier: once) | at most 1.5 s |
 | same adapter swapped back in | n/a | bit-identical weights and outputs |
 | vs a restart on a checkpoint merged by the same kernel | n/a | token logprob difference 0.0 |
 | decode step before and after a swap | same | same (compile-cache keys unchanged) |
@@ -210,7 +209,7 @@ concurrency 1 / 8 / 32, two passes each:
 |---|---|---|
 | released `temperature` sampler | 211 / 1,160 / 2,455 and 211 / 1,171 / 2,454 | 109 / 604 / 1,421 and 110 / 607 / 1,426 |
 | sampler kernel | 319 / 1,624 / 2,730 and 319 / 1,636 / 2,734 | 114 / 642 / 1,489 and 114 / 647 / 1,496 |
-| released `greedy` sampler (one pass: single run) | 311 / 1,608 / 2,781 | 113 / 639 / 1,533 |
+| released `greedy` sampler (one pass: once) | 311 / 1,608 / 2,781 | 113 / 639 / 1,533 |
 
 - At 8B the kernel is 4.5 to 6.6 percent above the released `temperature` sampler over the six cells (unrounded values in
   `82_sampler_kernel_r12.md`): not distinguished at screen tier. At 0.6B it is 10 percent or more above at all three concurrencies.
@@ -218,10 +217,10 @@ concurrency 1 / 8 / 32, two passes each:
   at 0.6B; 1,489 against 1,533 at 8B).
 - Sampled rollout as the RL loop asks (Qwen3-0.6B, temperature 0.7, 64 questions x 8 answers, up to 256 tokens, three
   passes): released 2,283 / 2,335 / 2,295 tok/s, kernel 2,472 / 2,484 / 2,484; not distinguished at screen tier.
-- Combinations at 0.6B (single run): kernel with `--dp-size 4` of TP1 in one server 223 / 1,420 / 3,026 (repeats at
+- Combinations at 0.6B (once): kernel with `--dp-size 4` of TP1 in one server 223 / 1,420 / 3,026 (repeats at
   concurrency 32: 3,039, 3,048, 3,035); kernel with 4 containers of TP1 223 / 1,438 / 3,098 (one measurement). The released
   `temperature` sampler with `--dp-size 4` gave 192 / 1,172 / 2,701.
-- Correctness (single run each). 0.6B at temperature 0, 20 prompts: the kernel equals the released `greedy` sampler on 20 of
+- Correctness (once each). 0.6B at temperature 0, 20 prompts: the kernel equals the released `greedy` sampler on 20 of
   20 prompts (largest logprob difference 5.7e-6). The released engine's own `temperature` and `greedy` samplers differ on 3
   of 20 prompts at temperature 0, and the kernel agrees with the `greedy` one, not with the `temperature` one, on those 3.
   At 8B the kernel equals the released `temperature` sampler on 20 of 20 (largest 3.8e-6). At temperature 0.8 with request
@@ -243,7 +242,7 @@ carries the temperature-mode kernel).
 
 Branch `feat/sampler-kernel-topk-topp` (on `integration`); switch `RLKIT_SAMPLER_KERNEL_TOPK=1` (unset or 0: the released
 function body runs). Tested off the device with `python tests/rlkit_sampler/selftest_sampler_topk.py`; run on a device once,
-at Qwen3-0.6B, TP4 (RESULTS.md section 10; tier: single run unless stated there).
+at Qwen3-0.6B, TP4 (RESULTS.md section 10; tier: once unless stated there).
 
 Hardware (Qwen3-0.6B, TP4, temperature 0, 20 prompts, batch 1). The first device run, with the vocabulary mask applied
 only when a padded column exists, gave other logprobs than the switch off: 0 of 20 first-token logprobs bit-equal (the
@@ -348,7 +347,7 @@ the top-logprob path on. Not read back from the server logs.
 
 What follows:
 
-- The probe gap (2,183-2,218 against 2,713-2,730 tok/s) is not explained by the `-O2` flag, as far as the code shows.
+- The probe gap (2,183-2,218 against 2,713-2,730 tok/s; tier: once) is not explained by the `-O2` flag, as far as the code shows.
 - The configuration the RL loop runs and the kernel replaces (`temperature`, top logprobs 0, decode at `-O2`) has
   no measured speed on the probe harness. The 2.62 ms profile figure comes from that configuration; the throughput gap does not.
 - The two numbers may still agree by coincidence: one is a wall-time gap, the other is instruction time summed over
@@ -364,7 +363,7 @@ context.
 Not taken:
 
 - The measured slope is real: with one live row the step is 9.3 / 13.7 / 25.2 ms at compiled context 1024 / 4096 / 8192
-  (`NIGHT_RECORD` section 6; tier: single run). But the design's central saving (fewer HBM bytes for dead blocks) is probably already
+  (`NIGHT_RECORD` section 6; tier: once). But the design's central saving (fewer HBM bytes for dead blocks) is probably already
   in the library kernel. The source of the library's decode attention (nkilib `attention_tkg.py` on its main branch,
   read second-hand through a web summary; the version in SDK 2.33 was not opened) skips out-of-range block entries in
   its indirect loads. What remains is compute and instruction issue over dead tiles, which nobody measured. The cause of
@@ -404,7 +403,7 @@ None of these has been tried against our code. Each line says where the idea com
 
 ## 5. Where the time goes
 
-All rows: Qwen3-0.6B, TP4, four logical cores, context 1024, one decode bucket of 32 unless stated. Tier: single run.
+All rows: Qwen3-0.6B, TP4, four logical cores, context 1024, one decode bucket of 32 unless stated. Tier: once.
 Profile of a rollout pass of 32 requests of up to 256 tokens. Nothing here is Qwen3-8B.
 
 | Quantity | Value | Condition | Source |
