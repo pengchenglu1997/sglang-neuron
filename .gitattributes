@@ -1,0 +1,4 @@
+# Tier 3 (lead only, see .github/CODEOWNERS). New in this pull request: the repository had no root .gitattributes.
+# The check tools and their fixtures compare bytes and run under bash, so they are checked out with LF on every platform
+# (a Windows clone with core.autocrlf=true would otherwise break two tests).
+rl/tools/** text eol=lf

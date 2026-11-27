@@ -13,6 +13,8 @@ F1 (fails the job):
     every TEAM path at --head has the same mode and blob id as at --main (git ls-tree of the two commits, whole trees,
     so an extra, a missing or a different team file fails). A sync that also carries ENGINE paths still needs exactly
     one label (cpu-only for the sync of the layout migration). Without --head and --main nothing counts as a sync;
+  - a hardware-verified pull request into integration is exempt from the sync rule only for rl/data/<session>/** and
+    docs/rl/**; every other TEAM path it changes must equal main (rl/tools, the workflow, AGENTS.md, CODEOWNERS ...);
   - a pull request with any ENGINE path carries exactly one of cpu-only (base integration only) or
     hardware-verified (base main or integration);
   - never both labels; a pull request with no changed path needs one label (the old rule);
@@ -59,6 +61,12 @@ def sync_differences(head, main, repo="."):
     return sorted(p for p in set(a) | set(b) if a.get(p) != b.get(p))
 
 
+def hw_own_path(p):
+    """The team paths a hardware-verified pull request into integration may differ from main on: its own session folder
+    rl/data/<session>/** and docs/rl/**."""
+    return p.startswith("docs/rl/") or re.match(r"^rl/data/[^/]+/.", p) is not None
+
+
 def f1(base, labels, paths, sync=None):
     """(ok, messages). sync: None when it was not computed; otherwise the list of TEAM paths on which the head differs
     from main (an empty list: the pull request is a sync from main)."""
@@ -79,15 +87,22 @@ def f1(base, labels, paths, sync=None):
     engine = [p for p in paths if not common.is_team(p)]
     team = [p for p in paths if common.is_team(p)]
     is_sync = False
-    if base == "integration" and team and ev != [HW]:
-        # A hardware-verified pull request keeps the old allowance: it may carry its own rl/data and docs/rl lines
-        # (pull request 15 did). Every other pull request that changes a team path into integration must be a sync.
-        if sync is None:
-            return False, ["F1: a pull request into integration changes a team path (%s) and was not compared with main; only a sync from main may do that." % team[0]]
-        if sync:
-            return False, ["F1: a pull request into integration changes team paths and is not a sync from main: %d team path(s) differ from main (%s%s)."
-                           % (len(sync), ", ".join(sync[:3]), ", ..." if len(sync) > 3 else "")]
-        is_sync = True
+    if base == "integration" and team:
+        # Only a hardware-verified pull request may carry its own rl/data/<session>/ and docs/rl lines (pull request 15
+        # did; specification section 6). Every other team path stays under the sync rule: it must equal main.
+        if ev == [HW]:
+            checked = [p for p in team if not hw_own_path(p)]
+            diffs = None if sync is None else [p for p in sync if not hw_own_path(p)]
+        else:
+            checked, diffs = team, sync
+        if checked:
+            if diffs is None:
+                return False, ["F1: a pull request into integration changes a team path (%s) and was not compared with main; only a sync from main may do that." % checked[0]]
+            if diffs:
+                return False, ["F1: a pull request into integration changes team paths and is not a sync from main: %d team path(s) differ from main (%s%s)%s."
+                               % (len(diffs), ", ".join(diffs[:3]), ", ..." if len(diffs) > 3 else "",
+                                  "; a hardware-verified pull request may differ only under rl/data/<session>/ and docs/rl/" if ev == [HW] else "")]
+            is_sync = True
     if not engine:
         if is_sync:
             return True, ["F1: team-only pull request into integration; every team path equals main (sync from main); no label needed (%s)." % (ev_set[0] if ev_set else "none given")]

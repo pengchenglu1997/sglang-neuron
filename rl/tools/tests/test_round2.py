@@ -97,6 +97,53 @@ class SyncRule(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("docs/rl/R.md", out)
 
+    HW = '["hardware-verified"]'
+
+    def test_hardware_verified_with_rewritten_checker_fails(self):
+        files = dict(self.MAIN_FILES)
+        files["sglang_neuron/e.py"] = "e = 1\n"
+        files["rl/tools/check_pr.py"] = "print('PASS')\n"
+        code, out = self.pr(files, self.HW)
+        self.assertEqual(code, 1, out)
+        self.assertIn("rl/tools/check_pr.py", out)
+        self.assertIn("not a sync from main", out)
+
+    def test_hardware_verified_with_rewritten_workflow_fails(self):
+        files = dict(self.MAIN_FILES)
+        files["sglang_neuron/e.py"] = "e = 1\n"
+        files[".github/workflows/team-checks.yml"] = "name: x\n"
+        code, out = self.pr(files, self.HW)
+        self.assertEqual(code, 1, out)
+        self.assertIn(".github/workflows/team-checks.yml", out)
+
+    def test_hardware_verified_with_agents_or_codeowners_fails(self):
+        for p in ("AGENTS.md", ".github/CODEOWNERS"):
+            files = dict(self.MAIN_FILES)
+            files["sglang_neuron/e.py"] = "e = 1\n"
+            files[p] = "changed\n"
+            code, out = self.pr(files, self.HW)
+            self.assertEqual(code, 1, (p, out))
+
+    def test_hardware_verified_with_own_data_folder_and_docs_rl_line_passes(self):
+        files = dict(self.MAIN_FILES)
+        files["sglang_neuron/e.py"] = "e = 1\n"
+        files["rl/data/2026-12-01_s/README.md"] = "session\n"
+        files["docs/rl/R.md"] = "r, plus one line\n"
+        code, out = self.pr(files, self.HW)
+        self.assertEqual(code, 0, out)
+
+    def test_hardware_verified_data_and_docs_only_needs_no_main_comparison(self):
+        # integration lacks rl/a.md that main has; the pull request does not touch it
+        code, out = self.pr({"sglang_neuron/e.py": "e = 3\n", "rl/data/s2/README.md": "x\n", "docs/rl/N.md": "n\n"}, self.HW)
+        self.assertEqual(code, 0, out)
+
+    def test_cpu_only_with_own_data_folder_is_not_exempt(self):
+        files = dict(self.MAIN_FILES)
+        files["sglang_neuron/e.py"] = "e = 1\n"
+        files["rl/data/2026-12-01_s/README.md"] = "session\n"
+        code, out = self.pr(files, '["cpu-only"]')
+        self.assertEqual(code, 1, out)
+
     def test_engine_only_pull_request_needs_no_sync(self):
         code, out = self.pr({"sglang_neuron/e.py": "e = 2\n"}, '["cpu-only"]')
         self.assertEqual(code, 0, out)
@@ -273,6 +320,42 @@ class CodeownersGitattributes(unittest.TestCase):
         idx = [i for i, l in enumerate(lines) if l[0] == "/.gitattributes"]
         self.assertTrue(idx and idx[0] > star)
         self.assertIn("tier 3", text)
+
+
+class ToolsAreCheckedOutWithLF(unittest.TestCase):
+    def test_gitattributes_pins_lf_for_the_tools_folder(self):
+        with open(os.path.join(ROOT, ".gitattributes"), encoding="utf-8") as fh:
+            lines = [l.strip() for l in fh if l.strip() and not l.startswith("#")]
+        self.assertIn("rl/tools/** text eol=lf", lines)
+
+    def test_git_reports_eol_lf_for_tool_files_and_fixtures(self):
+        # in a temporary repository that carries a copy of the real root .gitattributes
+        r = helpers.Repo()
+        try:
+            with open(os.path.join(ROOT, ".gitattributes"), "rb") as fh:
+                r.write(".gitattributes", fh.read())
+            for p in ("rl/tools/check_pr.py", "rl/tools/upstream_ready.sh", "rl/tools/tests/fixtures/f1_cases.json"):
+                code, out, err = run(["git", "check-attr", "eol", "text", "--", p], r.dir)
+                self.assertEqual(code, 0, err)
+                self.assertIn("eol: lf", out, p)
+                self.assertIn("text: set", out, p)
+        finally:
+            r.close()
+
+    def test_a_crlf_clone_still_gets_lf(self):
+        """Commit an LF file, then check it out with core.autocrlf=true under the same attribute: it stays LF."""
+        r = helpers.Repo()
+        try:
+            r.write(".gitattributes", "rl/tools/** text eol=lf\n")
+            r.write("rl/tools/a.py", "x = 1\n")
+            r.commit("c")
+            r.git("config", "core.autocrlf", "true")
+            os.remove(os.path.join(r.dir, "rl", "tools", "a.py"))
+            r.git("checkout", "--", "rl/tools/a.py")
+            with open(os.path.join(r.dir, "rl", "tools", "a.py"), "rb") as fh:
+                self.assertEqual(fh.read(), b"x = 1\n")
+        finally:
+            r.close()
 
 
 @unittest.skipUnless(HAVE_BASH, "bash is needed")

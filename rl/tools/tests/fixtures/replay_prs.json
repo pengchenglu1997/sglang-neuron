@@ -11,5 +11,6 @@
   "15": {"title": "topk kernel: apply the vocabulary mask on every call", "base": "integration", "labels": ["hardware-verified"],
          "paths": ["README.md", "docs/rl/KERNELS.md", "docs/rl/RESULTS.md", "sglang_neuron/rlkit_sampler_topk.py",
                    "tests/rlkit_sampler/README.md", "tests/rlkit_sampler/selftest_sampler_topk.py"],
-         "old_rule": "pass", "expect": "pass"}
+         "old_rule": "pass", "expect": "fail",
+         "why": "it changed README.md on integration; since round 3 a hardware-verified pull request into integration may differ from main only under rl/data/<session>/ and docs/rl/, so README.md would have to equal main (replay does not compare with main)"}
 }

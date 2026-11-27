@@ -7,9 +7,10 @@ name: team-checks
 #       Precondition of that sentence: .github/workflows/ and check_pr.py, common.py and the fixtures are lead-only in
 #       .github/CODEOWNERS, and the repository setting "require review from Code Owners" is on (the lead sets it; while
 #       it is off, the protection is only a convention).
-#       When the base holds no rl/tools, the pull request's own copy runs only if the base commit is one of the two
-#       bootstrap commits below (main before the tools existed, and the tip of integration when this was written).
-#       Any other base of main or integration without the tools fails F1.
+#       When the base holds no rl/tools: base main at the main bootstrap commit (this pull request itself) runs the pull
+#       request's own copy; base integration at the integration bootstrap commit runs the rl/tools of the fork's main
+#       (fetched below; F1 fails when main cannot be read or has none); any other base of main or integration fails F1.
+#       A base that is neither main nor integration keeps the old label rule, judged by the pull request's own copy.
 #       A pull request into integration that changes a team path must be a sync from main: every team path at the head
 #       equals main (rl/tools/check_pr.py, sync rule).
 #   F9  selftests of the tools                              required (fails the job)
@@ -60,14 +61,20 @@ jobs:
             git archive "$BASE_SHA" rl/tools | (cd "$f1dir" && tar -x)
             echo "F1 runs the rl/tools directory of the base commit"
           else
-            case "$BASE_SHA" in
-              "$BOOT_MAIN"|"$BOOT_INTEGRATION") bootstrap=1 ;;
-              *) bootstrap=0 ;;
-            esac
-            if [ "$bootstrap" = 1 ]; then
+            if [ "$BASE_REF" = main ] && [ "$BASE_SHA" = "$BOOT_MAIN" ]; then
+              # Only this pull request (it adds rl/tools to main) may be judged by its own copy.
               mkdir -p "$f1dir/rl"
               cp -R rl/tools "$f1dir/rl/tools"
-              echo "the base is a bootstrap commit without rl/tools: F1 runs the pull request's own copy"
+              echo "the base is the main bootstrap commit without rl/tools: F1 runs the pull request's own copy"
+            elif [ "$BASE_REF" = integration ] && [ "$BASE_SHA" = "$BOOT_INTEGRATION" ]; then
+              # Never the pull request's copy: it would judge itself. Use the checker that main holds.
+              if git cat-file -e "$MAIN_REF:rl/tools/check_pr.py" 2>/dev/null && git cat-file -e "$MAIN_REF:rl/tools/common.py" 2>/dev/null; then
+                git archive "$MAIN_REF" rl/tools | (cd "$f1dir" && tar -x)
+                echo "the base is the integration bootstrap commit without rl/tools: F1 runs the rl/tools directory of main"
+              else
+                echo "::error::F1: the integration bootstrap base holds no rl/tools and main ($MAIN_REF) could not be read or holds none either. F1 fails."
+                exit 1
+              fi
             elif [ "$BASE_REF" = main ] || [ "$BASE_REF" = integration ]; then
               echo "::error::F1: base $BASE_SHA of $BASE_REF holds no rl/tools and is not a bootstrap commit. The tools must exist at the base; merge main into the base first."
               exit 1

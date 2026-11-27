@@ -631,6 +631,61 @@ class WorkflowF1RunsTheBaseCopy(unittest.TestCase):
             self.assertIn("is not a bootstrap commit", out)
             self.assertNotIn("PASS", out)
 
+    FAKE = "import sys\nprint('PASS')\nsys.exit(0)\n"
+
+    def integration_bootstrap_pr(self, main_has_tools=True, fake=True):
+        """Base without tools (the integration bootstrap); main holds the real tools or none; the pull request carries a
+        fake check_pr.py that prints PASS, plus an engine change."""
+        self.r.write("README.md", "r\n")
+        base = self.r.commit("integration bootstrap base")
+        self.r.git("checkout", "-q", "-b", "mainline")
+        if main_has_tools:
+            for n, data in self.tools.items():
+                self.r.write("rl/tools/" + n, data)
+        else:
+            self.r.write("rl/x.md", "x\n")
+        main = self.r.commit("main")
+        self.r.git("checkout", "-q", "-b", "pr", base)
+        if fake:
+            self.r.write("rl/tools/check_pr.py", self.FAKE)
+            self.r.write("rl/tools/common.py", "x = 1\n")
+        self.r.write("sglang_neuron/a.py", "engine change, no label\n")
+        head = self.r.commit("pr")
+        return base, head, main
+
+    def test_integration_bootstrap_never_runs_the_pull_requests_own_checker(self):
+        base, head, main = self.integration_bootstrap_pr()
+        code, out, _ = self.step(base, head, [], base_ref="integration", bootstrap=("1" * 40, base), main_ref=main)
+        self.assertEqual(code, 1, out)
+        self.assertIn("rl/tools directory of main", out)
+        self.assertIn("not a sync from main", out)    # the fake checker is itself a team-path change
+        self.assertNotIn("PASS", out.replace("FAIL", ""))
+        # control: the same pull request judged by its own copy would have passed
+        code, out, _ = run([sys.executable, os.path.join(self.r.dir, "rl", "tools", "check_pr.py")], self.r.dir)
+        self.assertEqual(code, 0, out)
+
+    def test_integration_bootstrap_with_a_label_passes_through_mains_checker(self):
+        base, head, main = self.integration_bootstrap_pr(fake=False)
+        code, out, _ = self.step(base, head, [], base_ref="integration", bootstrap=("1" * 40, base), main_ref=main)
+        self.assertEqual(code, 1, out)
+        self.assertIn("exactly one", out)             # judged by main's real checker, no label
+        code, out, _ = self.step(base, head, ["cpu-only"], base_ref="integration", bootstrap=("1" * 40, base), main_ref=main)
+        self.assertEqual(code, 0, out)
+
+    def test_integration_bootstrap_fails_when_main_has_no_tools_or_cannot_be_read(self):
+        base, head, main = self.integration_bootstrap_pr(main_has_tools=False)
+        for ref in (main, "no-such-ref"):
+            code, out, _ = self.step(base, head, ["cpu-only"], base_ref="integration", bootstrap=("1" * 40, base), main_ref=ref)
+            self.assertEqual(code, 1, out)
+            self.assertIn("F1 fails", out)
+            self.assertNotIn("PASS", out)
+
+    def test_main_bootstrap_sha_does_not_open_the_integration_path(self):
+        base, head, main = self.integration_bootstrap_pr()
+        code, out, _ = self.step(base, head, ["cpu-only"], base_ref="integration", bootstrap=(base, "2" * 40), main_ref=main)
+        self.assertEqual(code, 1, out)
+        self.assertIn("is not a bootstrap commit", out)
+
     def test_other_base_ref_without_tools_runs_the_old_rule_with_the_pull_requests_copy(self):
         base, head = self.pr_adding_tools_on_a_base_without_them()
         code, out, _ = self.step(base, head, ["cpu-only"], base_ref="feat/x", bootstrap=("1" * 40, "2" * 40))
