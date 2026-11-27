@@ -4,13 +4,15 @@
     rewrite_links.py [--apply] [--exclude PREFIX]... [--repo DIR]
 
 The former run repository was imported complete under rl/: https://github.com/<owner>/trainium-sglang-rl/tree/main/X
-(or blob/main/X, or a pinned tree/<sha>/X) becomes rl/X, and the bare repository address becomes rl/. Inside a markdown
-link target the new path is relative to the file that holds it; in prose it is written from the repository root. A hit
-whose target does not exist in the checkout, and a clone address (.git), is printed as UNMAPPED and left alone.
+(or blob/main/X) becomes rl/X. Inside a markdown link target the new path is relative to the file that holds it; in prose
+it is written from the repository root. Only that form is rewritten. Three kinds of hit are printed and left alone:
+  MANUAL    the bare repository address (a sentence that says "the public repo" is false once the scripts are in this
+            repository: edit it by hand), and a link pinned to a commit (tree/<sha>/X would silently lose its pin)
+  UNMAPPED  a target that does not exist in the checkout, and a clone address (.git)
 Not touched: tests/ (it travels upstream), the files of rl/data/LEGACY.sha256, and the frozen records under rl/data/,
-rl/patches/ and rl/docs/, and rl/tools/ (its fixtures name the address). Without --apply nothing is written. --exclude PREFIX skips the files under a repo-relative
-prefix (repeatable). Line endings and every other byte are kept. Exit status: 0 nothing left to map (or all mapped),
-1 an UNMAPPED hit, 2 bad input.
+rl/patches/ and rl/docs/, and rl/tools/ (its fixtures name the address). Without --apply nothing is written. --exclude
+PREFIX skips the files under a repo-relative prefix (repeatable). Line endings and every other byte are kept. Exit
+status: 0 nothing is left for a person (everything was mapped), 1 a MANUAL or UNMAPPED hit remains, 2 bad input.
 """
 import argparse
 import os
@@ -53,18 +55,22 @@ def skipped(path, legacy, excludes):
 
 
 def map_match(m, text, path, repo):
-    """(new text or None, reason)."""
+    """(new text or None, kind, reason); kind is MANUAL or UNMAPPED when the new text is None."""
     if m.group(1):
-        return None, "a clone address; the checkout that holds rl/ is the repository"
+        return None, "UNMAPPED", "a clone address; the checkout that holds rl/ is the repository"
     sub = (m.group(3) or "").strip("/")
-    target = "rl/" + sub if sub else "rl/"
+    if not sub:
+        return None, "MANUAL", "the bare repository address in running text: rewrite the sentence, the scripts are in this repository now"
+    if m.group(2) != "main":
+        return None, "MANUAL", "a link pinned to %s: choose between rl/%s and a permalink of this repository" % (m.group(2), sub)
+    target = "rl/" + sub
     if not os.path.exists(os.path.join(repo, *target.rstrip("/").split("/"))):
-        return None, "%s does not exist in this checkout" % target
+        return None, "UNMAPPED", "%s does not exist in this checkout" % target
     in_link = text[max(0, m.start() - 2):m.start()] == "]("
     if in_link:
         rel = posixpath.relpath(target.rstrip("/"), posixpath.dirname(path) or ".")
-        return rel + ("/" if target.endswith("/") else ""), ""
-    return target, ""
+        return rel + ("/" if target.endswith("/") else ""), "", ""
+    return target, "", ""
 
 
 def process(repo, apply, excludes):
@@ -84,11 +90,11 @@ def process(repo, apply, excludes):
             continue
         out, last = [], 0
         for m in OLD.finditer(text):
-            new, why = map_match(m, text, path, repo)
+            new, kind, why = map_match(m, text, path, repo)
             line = text.count("\n", 0, m.start()) + 1
             if new is None:
                 unmapped += 1
-                hits.append("%s:%d: %s -> UNMAPPED (%s)" % (path, line, m.group(0), why))
+                hits.append("%s:%d: %s -> %s (%s)" % (path, line, m.group(0), kind, why))
                 continue
             hits.append("%s:%d: %s -> %s" % (path, line, m.group(0), new))
             out.append(text[last:m.start()])
@@ -113,7 +119,7 @@ def main(argv=None):
     hits, unmapped = process(os.path.abspath(a.repo), a.apply, a.exclude)
     for h in hits:
         print(h)
-    print("rewrite_links.py: %d hit(s), %d unmapped, %s" % (len(hits), unmapped, "written" if a.apply else "dry run"))
+    print("rewrite_links.py: %d hit(s), %d left for a person (MANUAL or UNMAPPED), %s" % (len(hits), unmapped, "written" if a.apply else "dry run"))
     return 1 if unmapped else 0
 
 

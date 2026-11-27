@@ -48,10 +48,18 @@ class Rewrite(unittest.TestCase):
 
     def test_link_target_is_relative_to_its_file_and_prose_from_the_root(self):
         code, out = self.run_main("--exclude", "docs/rl/GONE.md", "--apply")
-        self.assertEqual(code, 0, out)
-        self.assertIn("[data](rl/data/s) and the repo rl/, cite rl/REPRODUCE.md.", self.read("README.md"))
+        self.assertEqual(code, 1, out)               # the bare address and the pinned link are left for a person
+        self.assertIn("[data](rl/data/s) and the repo %s, cite rl/REPRODUCE.md." % OLD, self.read("README.md"))
         self.assertIn("[folder](../../rl/data/s)", self.read("docs/rl/RESULTS.md"))
-        self.assertIn("and (rl/data/s).", self.read("docs/rl/RESULTS.md"))      # a pinned tree link in prose
+
+    def test_bare_address_and_pinned_links_are_manual_and_untouched(self):
+        code, out = self.run_main("--exclude", "docs/rl/GONE.md", "--apply")
+        self.assertEqual(code, 1, out)
+        self.assertIn("README.md:1: %s -> MANUAL" % OLD, out)
+        self.assertIn("a link pinned to abc1234", out)
+        self.assertIn("and (%s/tree/abc1234/data/s)." % OLD, self.read("docs/rl/RESULTS.md"))
+        self.assertNotIn("rl/data/s).", self.read("docs/rl/RESULTS.md").split("and (")[1])
+        self.assertNotIn("the repo rl/", self.read("README.md"))
 
     def test_protected_files_are_left_alone(self):
         self.run_main("--exclude", "docs/rl/GONE.md", "--apply")
@@ -77,8 +85,9 @@ class Rewrite(unittest.TestCase):
     def test_second_run_finds_nothing_more_to_map(self):
         self.run_main("--exclude", "docs/rl/GONE.md", "--apply")
         code, out = self.run_main("--exclude", "docs/rl/GONE.md")
-        self.assertEqual(code, 0, out)
-        self.assertIn("0 hit(s)", out)
+        self.assertEqual(code, 1, out)               # the two MANUAL hits remain for a person
+        self.assertEqual(out.count("-> rl/"), 0)
+        self.assertEqual(out.count("-> MANUAL"), 2)
 
     def test_bad_repo(self):
         self.assertEqual(rewrite_links.main(["--repo", os.path.join(self.r.dir, "nope")]), 2)
