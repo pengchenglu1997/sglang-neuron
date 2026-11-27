@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """SGLANG_NEURON_LM_HEAD_PRETRANSPOSED: the LM head's logits with the switch on equal its logits with it off, tied and
-untied, and the switch's two layouts hold the same checkpoint tensor.
+untied, the switch's two layouts hold the same checkpoint tensor, and an in-place reload (``reload_weights``) writes
+every copy of the vocabulary table: both the embedding and the LM head's own copy on a tied model with the switch on.
 
 Runs on the CPU with torch and safetensors only. The NKI attention kernels and SGLang's parallel state do not exist
 off the device, so they are replaced by stand-ins before the model module is imported; the test builds the smallest
@@ -206,6 +207,50 @@ class LmHeadPretransposedTest(unittest.TestCase):
                         whole = torch.cat(shards, dim=1)
                         self.assertTrue(torch.equal(whole[:, :stored_rows], table.t()))
                         self.assertTrue(torch.equal(whole[:, stored_rows:], torch.zeros_like(whole[:, stored_rows:])))
+
+    def check_reload(self, tied: bool, switch: str | None):
+        """``reload_weights`` (the in-place update) from a second checkpoint: every copy of the vocabulary table the
+        model holds then holds the new tensor, the parameters stay the same objects (the compiled graphs hold them),
+        and the logits equal those of a model loaded from the new checkpoint at start-up."""
+        with tempfile.TemporaryDirectory() as old_dir, tempfile.TemporaryDirectory() as new_dir:
+            _checkpoint(old_dir, tied, seed=21)
+            new = _checkpoint(new_dir, tied, seed=22)
+            head_key = "model.embed_tokens.weight" if tied else "lm_head.weight"
+            model = self.build(tied, switch, old_dir)
+            self.assertFalse(torch.equal(model.embed_tokens.weight, new["model.embed_tokens.weight"]))
+            before = {name: param for name, param in model.named_parameters(remove_duplicate=False)}
+            shared_before = model.lm_head.weight is model.embed_tokens.weight
+
+            model.reload_weights(new_dir)
+
+            after = dict(model.named_parameters(remove_duplicate=False))
+            self.assertEqual(set(before), set(after))
+            for name, param in after.items():
+                self.assertIs(param, before[name], name)
+            self.assertEqual(model.lm_head.weight is model.embed_tokens.weight, shared_before)
+            self.assertTrue(torch.equal(model.embed_tokens.weight, new["model.embed_tokens.weight"]))
+            if model.lm_head_pretransposed:
+                self.assertTrue(torch.equal(model.lm_head.weight, new[head_key].t()))
+            else:
+                self.assertTrue(torch.equal(model.lm_head.weight, new[head_key]))
+
+            hidden = (torch.randn(5, HIDDEN, generator=torch.Generator().manual_seed(13)) * 2).to(torch.bfloat16)
+            fresh = self.build(tied, switch, new_dir)
+            self.assertTrue(torch.equal(self.tail(model, hidden), self.tail(fresh, hidden)))
+            self.assertTrue(torch.equal(self.tail(model, hidden),
+                                        torch.nn.functional.linear(model.norm(hidden), new[head_key])))
+
+    def test_reload_tied_switch_on_refreshes_both_copies(self):
+        self.check_reload(tied=True, switch="1")
+
+    def test_reload_untied_switch_on(self):
+        self.check_reload(tied=False, switch="1")
+
+    def test_reload_tied_switch_off_unchanged(self):
+        self.check_reload(tied=True, switch=None)
+
+    def test_reload_untied_switch_off_unchanged(self):
+        self.check_reload(tied=False, switch=None)
 
     def test_switch_value_is_checked_and_registered(self):
         envs = self.config_module
