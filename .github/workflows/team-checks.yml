@@ -16,8 +16,15 @@ name: team-checks
 #       A pull request into integration that changes a team path must be a sync from main: every team path at the head
 #       equals main (rl/tools/check_pr.py, sync rule).
 #   F9  selftests of the tools                              required (fails the job)
-#   F2-F8, F10                                              fail the job "F2-F8 and F10" for base main (each check is run, and
-#       every failure is printed); report mode for base integration (a warning, exit 0)
+#   F2-F8, F10                                              fail the job "F2-F8 and F10" on every base (each check is run, and
+#       every failure is printed). Report mode (a warning) only for two checks, and only for base integration, because a
+#       pristine integration is red on them for reasons outside a pull request's control:
+#         F5 switches: README.md is a team path that must equal main (sync rule), and its switches block describes main's
+#           code, while integration adds switches. Green once integration's switches equal main's, or once the block
+#           names a branch per row for integration.
+#         F10: two engine files of integration mention rl/ (sglang_neuron/rlkit_sampler_topk.py, tests/rlkit_sampler/README.md).
+#           Green once a cpu-only engine pull request into integration removes those mentions.
+#       F3 scrubs every changed file that still exists (engine files too), with rl/tools/scrub_allow.txt.
 # F5 (generated blocks) runs best.py, switches.py and check_tables.py in that job. A document without the markers is
 # reported as not checked and passes; rl/tools/tests/test_docs_pr.py (F9) requires the markers in README.md and RESULTS.md.
 on:
@@ -162,18 +169,25 @@ jobs:
           fail=0
           git diff --name-only -z --no-renames "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/paths.z"
           git diff --name-only -z --no-renames --diff-filter=d "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/changed_alive.z"
-          python $T/check_pr.py classify --kind team -z < "$RUNNER_TEMP/changed_alive.z" > "$RUNNER_TEMP/team_files.z"
           printf '%s' "$PR_BODY" > "$RUNNER_TEMP/body.txt"
           step() { name="$1"; shift; echo "::group::$name"; if "$@"; then echo "$name: ok"; else echo "::error::$name failed"; fail=1; fi; echo "::endgroup::"; }
+          # integration_report: report mode for base integration only (the reasons: the header of this file); on every
+          # other base it is step, so a failure fails the job.
+          integration_report() {
+            if [ "$BASE_REF" != integration ]; then step "$@"; return; fi
+            name="$1"; shift; echo "::group::$name"
+            if "$@"; then echo "$name: ok"; else echo "::warning::$name failed; report mode for base integration only (see the header of team-checks.yml)"; fi
+            echo "::endgroup::"
+          }
           step "F2 hardware evidence" python $T/check_pr.py f2 --labels-json "$LABELS_JSON" --paths-file "$RUNNER_TEMP/paths.z" --body-file "$RUNNER_TEMP/body.txt" --head "$HEAD_SHA" --main "$MAIN_SHA"
-          step "F3 scrub of changed team files" python $T/scrub_check.py --files-from-0 "$RUNNER_TEMP/team_files.z" --allow $T/scrub_allow.txt
+          step "F3 scrub of every changed file" python $T/scrub_check.py --files-from-0 "$RUNNER_TEMP/changed_alive.z" --allow $T/scrub_allow.txt
           step "F4 public CPU lint" python $T/check_docs.py f4 --base "$BASE_SHA"
           # F5: best.tsv rows and the best blocks; the switches table and the default-on exception list (only where the
           # base is main or integration, diffed against upstream-main); make_tables.py output against tables.txt.
           # A document without a generated block is reported as not checked (test_docs_pr.py requires the markers).
           step "F5 best.tsv and best blocks" python $T/best.py --check README.md docs/rl/RESULTS.md
           if [ "$BASE_REF" = main ] || [ "$BASE_REF" = integration ]; then
-            step "F5 switches" python $T/switches.py --check README.md --base origin/upstream-main --branch "HEAD=$BASE_REF"
+            integration_report "F5 switches" python $T/switches.py --check README.md --base origin/upstream-main --branch "HEAD=$BASE_REF"
           else
             echo "F5 switches: not checked, the base $BASE_REF is neither main nor integration"
           fi
@@ -181,12 +195,6 @@ jobs:
           step "F6 data folders" python $T/check_data.py --base "$BASE_SHA" --head "$HEAD_SHA"
           step "F7 links and paths" python $T/check_docs.py f7 --base "$BASE_SHA"
           step "F8 state wording on added lines" python $T/check_docs.py f8 --base "$BASE_SHA" --head "$HEAD_SHA"
-          step "F10 engine files do not mention rl/ and symlinks" python $T/check_docs.py f10
-          # Only a pull request into main fails the job. Into integration the checks run in report mode: its engine
-          # files and its switches differ from main's documents (F5 switches describes main's code, F10 sees engine
-          # files that mention rl/), so a red job there would be about the branch and not about the change.
-          if [ "$fail" -ne 0 ] && [ "$BASE_REF" != main ]; then
-            echo "::warning::team checks failed; report mode for base $BASE_REF (the job fails only for base main)"
-            exit 0
-          fi
+          integration_report "F10 engine files do not mention rl/ and symlinks" python $T/check_docs.py f10
+          # Every other check fails the job on every base.
           exit "$fail"

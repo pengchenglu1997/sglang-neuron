@@ -28,6 +28,14 @@ level because the records, `backends.json` and every script's `sys.path` name th
 | Records | `docs/` | session records and plans, frozen |
 | Checks | `tools/` | the team checks and the generators below |
 
+Corrections to frozen session READMEs (the file stays byte-identical; the correction is written here):
+- `data/2026-11-26_trn2/README.md` says the scripts that wrote its files are "at the top level of this repository". Since the
+  import they are at the top level of `rl/` (this folder), and its `docs/EXPERIMENTS.md` link is this folder's `docs/EXPERIMENTS.md`.
+- `data/2026-11-26_trn2/lm_head/PATCH_MANIFEST.txt` was added after the session: the output of
+  `python rl/make_patch_dir.py --ref 9857f66` (`REPRODUCE.md`). The served folder was copied by hand; its 7 lines equal the
+  as-run record `lm_head/patch_sha256.txt` line for line; `data/2026-11-26_trn2/SHA256SUMS.patch_manifest` lists its sha256. A
+  `hardware-verified` pull request can cite `rl/data/2026-11-26_trn2` for those 7 files (check F2).
+
 ## Tools (`rl/tools/`)
 
 | Command | What it answers |
@@ -35,7 +43,8 @@ level because the records, `backends.json` and every script's `sys.path` name th
 | `python rl/tools/best.py` | the headline numbers with tier and baseline; `--check` reads every file |
 | `python rl/tools/switches.py` | the environment variables this fork's engine changes add, read from the code |
 | `bash rl/tools/fork_state.sh` | branches, open pull requests, our upstream pull requests and issues, what main has that integration lacks |
-| `bash rl/tools/upstream_ready.sh <branch>` | whether a branch carries only engine paths |
+| `bash rl/tools/upstream_ready.sh <branch>` | whether a branch carries only engine paths and its CPU tests pass (exit 3: no test found; exit 2 "cannot run tests": a missing module) |
+| `rl/tools/selftest_template.py` | the CPU selftest a change for upstream copies to `tests/<area>/selftest_<topic>.py` |
 | `python rl/tools/rewrite_links.py` | the links that still point into the former run repository (dry run) |
 | `python rl/tools/migration/numbers_moved.py --base origin/main` | every numeral a documentation change removed from `README.md` and `docs/rl/`, and the line of `rl/` that holds it now |
 | `python rl/tools/migration/integration_lines.py` | the lines `docs/rl/` has only on `integration`, and whether each is on `main` now |

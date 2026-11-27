@@ -5,7 +5,8 @@
 
 All bytes are read from git objects (git show), never from the working tree.
   - a new folder rl/data/<session>/ has README.md and SHA256SUMS (every line verified, every other file listed);
-    PATCH_MANIFEST.txt is required for sglang-neuron runs, which a script cannot tell: its absence is printed as a note;
+  - its README.md has a line 'Served: <fork commit>[, <commit> ...]' or 'Served: none'. A folder "served an engine
+    patch" when that line names anything other than none; it then needs a PATCH_MANIFEST.txt (fails without one);
   - files added to a session folder that already exists at the base must be listed, with their sha256, in a sums file
     that the same pull request adds to that folder, named SHA256SUMS.<tag> (the folder's own SHA256SUMS is never
     changed: it would fail as modified); the sums file is verified like SHA256SUMS;
@@ -45,6 +46,18 @@ def parse_sums(data):
 
 def sha(data):
     return hashlib.sha256(data).hexdigest()
+
+
+SERVED = re.compile(r"^\s*(?:[-*]\s+)?Served:\s*(.*?)\s*$")
+
+
+def served_line(readme):
+    """The text after 'Served:' on the first such line of a session README (optionally a list item), or None."""
+    for line in readme.decode("utf-8", "replace").splitlines():
+        mo = SERVED.match(line)
+        if mo:
+            return mo.group(1)
+    return None
 
 
 def check(base, head, repo="."):
@@ -114,8 +127,14 @@ def check(base, head, repo="."):
             listed = verify(pre, "SHA256SUMS")
             for rel in sorted(set(names) - listed - {"SHA256SUMS"}):
                 bad("F6: %s%s is not listed in SHA256SUMS." % (pre, rel))
-        if not any(r.endswith("PATCH_MANIFEST.txt") for r in names):
-            notes.append("F6 note: %s has no PATCH_MANIFEST.txt (required for sglang-neuron runs)." % pre)
+        if "README.md" in names:
+            served = served_line(common.show(head, pre + "README.md", cwd=repo) or b"")
+            if served is None:
+                bad("F6: %sREADME.md has no 'Served:' line; write 'Served: <fork commit>[, <commit> ...]' (the engine "
+                    "patches its servers ran) or 'Served: none'." % pre)
+            elif served.lower() != "none" and not any(r.endswith("PATCH_MANIFEST.txt") for r in names):
+                bad("F6: %sREADME.md says 'Served: %s', so the folder served an engine patch and needs the "
+                    "PATCH_MANIFEST.txt of each patch folder (python rl/make_patch_dir.py writes it)." % (pre, served))
     legacy = common.show(head, "rl/data/LEGACY.sha256", cwd=repo)
     if legacy is None:
         notes.append("F6 note: rl/data/LEGACY.sha256 is absent at the head; imported files not compared.")

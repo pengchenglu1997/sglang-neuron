@@ -11,7 +11,9 @@ F4  public-CPU lint: in docs/rl/**, README.md and rl/**/*.md, a line that matche
     the start of a longer word: CPUs, simulators) and holds a digit outside a code span, a link target or a URL fails.
     An allow entry "<path><TAB>public-cpu-lint<TAB><reason><TAB><line>" accepts that one line (white space collapsed).
 F8  state lint on the lines added between base and head: phrases that state a changing fact. Lines of
-    a quoted block (starting with >) are exempt.
+    a quoted block (starting with >) are exempt. Also "no difference", "no change" or "no effect" (rl/METHOD.md
+    section 1) fails unless paired(n) or paired(<number>) is on the same line; inside a code span or straight double
+    quotes it is not counted.
 F10 no ENGINE file mentions rl/ or imports from it; no symlink (git mode 120000) outside TEAM paths leads into a team
     path (following the links on the way), and no symlink under TEAM paths leads outside them.
 The prose checks (F7, F4, F8) skip only frozen records that already exist: a file under rl/data/, rl/patches/ or
@@ -44,6 +46,11 @@ STATE_PATTERNS = [
     r"for now",
 ]
 STATE_RX = [re.compile(p, re.I) for p in STATE_PATTERNS]
+# rl/METHOD.md section 1: "no difference" or "no change" (also "no effect", "has no effect") is a claim that needs
+# paired(n); at screen tier it is written "not distinguished at screen tier". F8 fails such an added line unless
+# paired(<n>) is on the same line. A phrase inside a code span or straight double quotes is quoted, not claimed.
+NULL_CLAIM_RX = re.compile(r"\bno (?:difference|change|effect)s?\b", re.I)
+PAIRED_RX = re.compile(r"\bpaired\((?:n|[0-9]+)\)", re.I)
 CPU_RX = re.compile(r"\b(?:cpu|simulator|laptop)", re.I)
 LINK_RX = re.compile(r"\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 RLPATH_RX = re.compile(r"(?<![A-Za-z0-9_./-])(rl/[A-Za-z0-9_./-]*[A-Za-z0-9_/-])")
@@ -212,6 +219,10 @@ def f8(base, head, repo="."):
                 if mo:
                     msgs.append("F8: %s:%d state wording '%s'." % (p, n, mo.group(0)))
                     break
+            mo = NULL_CLAIM_RX.search(re.sub(r"`[^`]*`|\"[^\"]*\"", "", line))
+            if mo and not PAIRED_RX.search(line):
+                msgs.append("F8: %s:%d '%s' needs paired(n) on the same line (rl/METHOD.md section 1); at screen tier "
+                            "write 'not distinguished at screen tier'." % (p, n, mo.group(0)))
     return not msgs, msgs or ["F8: no state wording on added lines."]
 
 

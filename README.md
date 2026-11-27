@@ -6,7 +6,8 @@ up on hardware. The plugin itself: the [upstream README](https://github.com/peng
 
 - **For:** a fast rollout server for RL post-training on Trainium2.
 - **Headline metric:** output tokens per second at concurrency 32 (prompt 1,024 tokens, 256 output tokens, one chip as TP4).
-- **Compared with:** vllm-neuron 0.29.0.1.2.0 measured in the same session, and this fork's own code with its switches off.
+- **Compared with:** vllm-neuron 0.29.0.1.2.0 measured in the same session, and the code without our change: this fork's
+  code with its switches off for Qwen3-0.6B (`q06_off`), the released image (SGLang-Neuron v0.1.0) for Qwen3-8B (`q8_rel`).
 - **Tier:** every number is `screen` (at least 2 passes on one server start) or lower; a difference under 10 percent is
   not distinguished at that tier ([rl/METHOD.md](rl/METHOD.md)). Claims and sources: [docs/rl/RESULTS.md](docs/rl/RESULTS.md).
 
@@ -24,6 +25,7 @@ Session of 2026-11-26, read from the result files by `python rl/tools/best.py` (
 | q8_kernel | Qwen3-8B | temperature sampler kernel on, LM head switch off | 1,501.1 and 1,500.2 tok/s at concurrency 32 | q8_vllm: 1,126.9 and 1,112.4 tok/s at concurrency 32 | screen | `rl/data/2026-11-26_trn2/lm_head/results/`: `llmbench_b_lmh_q8_s0k_t0_p1.csv`, `llmbench_b_lmh_q8_s0k_t0_p2.csv` |
 | q8_lmh_on | Qwen3-8B | temperature sampler kernel and pre-transposed LM head on | 1,497.5 and 1,504.1 tok/s at concurrency 32; not distinguished at screen tier | q8_kernel: 1,501.1 and 1,500.2 tok/s at concurrency 32 | screen | `rl/data/2026-11-26_trn2/lm_head/results/`: `llmbench_b_lmh_q8_s1k_t0_p1.csv`, `llmbench_b_lmh_q8_s1k_t0_p2.csv` |
 | q8_vllm | Qwen3-8B | vllm-neuron 0.29.0.1.2.0 | 1,126.9 and 1,112.4 tok/s at concurrency 32 | - | screen | `rl/data/2026-11-26_trn2/serving/`: `llmbench_b_q8_vllm_p1.csv`, `llmbench_b_q8_vllm_p2.csv` |
+| q8_rel | Qwen3-8B | released image (SGLang-Neuron v0.1.0), no fork change | 1,421.0 and 1,421.3 tok/s at concurrency 32 | - | screen | `rl/data/2026-11-26_trn2/serving/`: `llmbench_b_q8_rel_t0_p1.csv`, `llmbench_b_q8_rel_t0_p2.csv` |
 <!-- best:end -->
 
 ## Switches this fork adds
@@ -44,8 +46,8 @@ State (open branches, pull requests, our upstream pull requests, the mirror) is 
 
 | Branch | What it holds | Who writes to it |
 |---|---|---|
-| `main` | Upstream plus our changes that ran on Trainium2 hardware, plus the team paths (`rl/`, `docs/rl/`, `.github/`, this page, `AGENTS.md`). Start new work here. | Pull request |
-| `integration` | `main`, plus changes that did not run on hardware, plus upstream pull requests we carry | Pull request labelled `cpu-only` |
+| `main` | Upstream plus our changes that ran on Trainium2 hardware, plus the team paths (`rl/`, `docs/rl/`, `.github/`, `.claude/`, this page, `AGENTS.md`). Team-path work and engine changes that ran on a device start here; engine work that did not run on a device starts on `integration` ([AGENTS.md](AGENTS.md) section 3). | Pull request: no label for team paths only, `hardware-verified` for an engine change |
+| `integration` | `main`, plus changes that did not run on hardware, plus upstream pull requests we carry | Pull request labelled `cpu-only` (did not run on a device) or `hardware-verified`; team paths change only as a sync from `main` |
 | `upstream-main` | The upstream `main`, unchanged; moved by hand when upstream moves | Nobody; it is a copy |
 | `feat/*`, `fix/*` | One piece of work each; a branch meant for upstream starts from `upstream-main` | Whoever claimed the work |
 
