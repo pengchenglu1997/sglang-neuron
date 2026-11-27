@@ -1,9 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """The shape of a dense decoder-only transformer, and the switches the models built on it differ by."""
 
+import os
 from dataclasses import dataclass
 
 import torch
+
+from sglang_neuron import env_registry
 
 # the graphs compute in bfloat16
 DTYPE = torch.bfloat16
@@ -37,6 +40,17 @@ class TransformerConfig:
                              f"{self.num_key_value_heads} KV heads")
         if not 0 < self.rotary_dim <= self.head_dim or self.rotary_dim % 2:
             raise ValueError(f"a rotary dimension of {self.rotary_dim} does not fit a head of {self.head_dim}")
+
+
+LM_HEAD_PRETRANSPOSED_ENV = "SGLANG_NEURON_LM_HEAD_PRETRANSPOSED"
+
+
+def lm_head_pretransposed(environ=os.environ) -> bool:
+    """SGLANG_NEURON_LM_HEAD_PRETRANSPOSED: 1 gives the LM head its own [H, V / tp] weight, the layout its matmul reads,
+    filled from the checkpoint tensor at load; a tied model then holds the embedding's [V / tp, H] shard and this one
+    (one extra vocabulary shard per rank). Off (0, the default) the LM head reads the [V / tp, H] shard transposed, and
+    a tied model shares the embedding's device copy. Any other value is refused."""
+    return env_registry.zero_or_one(LM_HEAD_PRETRANSPOSED_ENV, environ)
 
 
 def check_bf16_launch(hf_config, architecture: str) -> None:
