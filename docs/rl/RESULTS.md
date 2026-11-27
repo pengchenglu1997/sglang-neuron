@@ -554,8 +554,11 @@ Conditions for every row of this section:
 - trn2.48xlarge (Trainium2), v0.1.0 image, Qwen3-0.6B, TP4 on 4 logical cores (shard width 37,984, vocabulary 151,936:
   no padded column), `SGLANG_NEURON_SAMPLER=topk_topp`, `SGLANG_NEURON_MAX_TOP_LOGPROBS=20`, launch flags as in section 9.
   "Kernel on" is `RLKIT_SAMPLER_KERNEL_TOPK=1`, "kernel off" is the switch unset.
-- One session, one cold start per server (empty compile cache of its own; a cache stamped by other kernel sources is
-  refused). Other jobs ran on the same machine, on other chips. No row was repeated on a quiet machine.
+- One session, one start per server (a cache stamped by other kernel sources is refused). The three servers of 10.1
+  (kernel on, kernel off, and the second kernel-off server) each started from a copy of the same earlier kernel-off
+  compile cache (94 files). The servers of 10.2 started on empty caches (0 files); the 10.3 servers each had a cache
+  directory of their own, and the file count at start was not recorded. Other jobs ran on the same machine, on other
+  chips. No row was repeated on a quiet machine.
 - Result files are not in the public data repository yet; names below are the files of the session.
 
 ### 10.1 Before the fix: the mask skipped on the kernel path (information)
@@ -574,7 +577,8 @@ The kernel path applied the vocabulary mask only when a padded column exists, th
 
 Two kernel-off servers of the same code agreed with each other on the first-token logprob (20 of 20,
 `cmp_r1_koff_r2_koff_b.txt`). Position-0 gaps between top-20 logprobs lay on a 1/16 grid in 380 of 380 cases with the
-kernel on and mask skipped, and in 2 of 380 with the mask applied (`grid_*.txt`); that is consistent with bf16-valued
+kernel on and mask skipped, and in 2 of 380 (about the chance rate for the 2e-4 tolerance) on every other server of this
+section, including the released path with the mask removed (10.2) (`grid_*.txt`); that is consistent with bf16-valued
 logits and does not prove it. Speed numbers of the same code, kernel off 2,610.9 and 2,620.8 tok/s, kernel on 2,769.7 and
 2,863.2 tok/s at concurrency 32 (`llmbench_b_q06_topk_koff_k50_p1/p2.csv`, `llmbench_b_q06_topk_kon_k50_p1/p2.csv`),
 are from before the fix and are not comparable with the table in 10.3 beyond what 10.3 says.
@@ -593,7 +597,9 @@ Same 20 prompts and settings, kernel on against kernel off, both servers running
 | same token sequences | 20 of 20 |
 
 The kernel-on server with the mask also equals the earlier kernel-off server without the patch on 20 of 20 prompts at
-every position (`cmp_r1_koff_r3_kon_mask.txt`). The log line "topk_topp sampler by the kernel" appeared 4 times
+every position (`cmp_r1_koff_r3_kon_mask.txt`), and the kernel-off server with the mask, which started on an empty cache,
+equals the warm-copy kernel-off server of 10.1 on 20 of 20 prompts at every position (`cmp_r1_koff_r3_koff_mask.txt`).
+The log line "topk_topp sampler by the kernel" appeared 4 times
 (one per rank, `rows=1`) in the kernel-on server; it is logged when the graph is traced, so it shows that the kernel
 branch was traced into the one-row graph, not that each request ran it.
 
@@ -602,8 +608,9 @@ prompts. What it does not show:
 
 - Why. A control on the released path (kernel off) with its mask removed gave the same outputs as with the mask, 20 of 20
   prompts at every position (`cmp_r1_koff_r5_koff_nomask.txt`, one run), so removing the mask alone does not produce
-  the difference. A run with the kernel's winner unused but the kernel still in the graph and the mask skipped gave the
-  kernel-on outputs of 10.1 at position 0 (`cmp_r1_kon_r4_kon_dead.txt`). Why the compiled graph differs when the kernel
+  the difference. A run with the kernel's winner unused but the kernel still in the graph, and the mask not applied to the
+  logits that feed the logprobs (an all-false `masked_fill` sits on the winner branch only), gave the kernel-on outputs
+  of 10.1 at position 0 (`cmp_r1_kon_r4_kon_dead.txt`). Why the compiled graph differs when the kernel
   is present and the mask absent was not determined (no HLO or NEFF was read).
 - Not run: temperature above 0 compared token by token, batch above 1 for this comparison, Qwen3-8B,
   `RLKIT_SAMPLER_KERNEL=1` together with this fix, a padded vocabulary on a device.
@@ -616,8 +623,9 @@ prompts. What it does not show:
 llmbench, prompt 1024 tokens, 256 output tokens (`ignore_eos`), 64 requests per cell after 4 warm-up requests, streaming
 `/v1/completions`; output tokens per second. Pass "top-k 50" is temperature 0.8, top-k 50, top-p 0.95, run twice on
 one server start; "no filter" is temperature 0.8, top-k off, top-p 1, min-p 0, run once. Kernel on and kernel off ran on
-separate sets of 4 cores, started together (whether the benchmarks overlapped in time was not recorded)
-(`llmbench_b_…_kon_*.csv`, `llmbench_b_…_koff_*.csv`).
+separate sets of 4 cores, started together, and the two benchmarks ran interleaved: by the recorded request start times,
+5 of the 6 concurrency-32 cells overlapped a concurrency-1 cell of the other server (`llmbench_b_…_kon_*.csv`,
+`llmbench_b_…_koff_*.csv`, and their raw per-request files).
 
 | Server | Pass | Concurrency 1 | Concurrency 8 | Concurrency 32 |
 |---|---|---|---|---|
