@@ -11,7 +11,9 @@ F4  public-CPU lint: in docs/rl/**, README.md and rl/**/*.md, a line that matche
     the start of a longer word: CPUs, simulators) and holds a digit outside a code span, a link target or a URL fails.
     An allow entry "<path><TAB>public-cpu-lint<TAB><reason><TAB><line>" accepts that one line (white space collapsed).
 F8  state lint on the lines added between base and head: phrases that state a changing fact. Lines of
-    a quoted block (starting with >) are exempt.
+    a quoted block (starting with >) are exempt. Also "no difference", "no change" or "no effect" (rl/METHOD.md
+    section 1) fails unless paired(n) or paired(<number>) is on the same line; inside a code span or straight double
+    quotes it is not counted.
 F10 no ENGINE file mentions rl/ or imports from it; no symlink (git mode 120000) outside TEAM paths leads into a team
     path (following the links on the way), and no symlink under TEAM paths leads outside them.
 The prose checks (F7, F4, F8) skip only frozen records that already exist: a file under rl/data/, rl/patches/ or
@@ -44,6 +46,11 @@ STATE_PATTERNS = [
     r"for now",
 ]
 STATE_RX = [re.compile(p, re.I) for p in STATE_PATTERNS]
+# rl/METHOD.md section 1: "no difference" or "no change" (also "no effect", "has no effect") is a claim that needs
+# paired(n); at screen tier it is written "not distinguished at screen tier". F8 fails such an added line unless
+# paired(<n>) is on the same line. A phrase inside a code span or straight double quotes is quoted, not claimed.
+NULL_CLAIM_RX = re.compile(r"\bno (?:[\w-]+ ){0,2}(?:difference|change|effect)s?\b", re.I)
+PAIRED_RX = re.compile(r"\bpaired\([0-9]+\)", re.I)    # a count: the literal 'paired(n)' is not the evidence
 CPU_RX = re.compile(r"\b(?:cpu|simulator|laptop)", re.I)
 LINK_RX = re.compile(r"\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 RLPATH_RX = re.compile(r"(?<![A-Za-z0-9_./-])(rl/[A-Za-z0-9_./-]*[A-Za-z0-9_/-])")
@@ -212,6 +219,10 @@ def f8(base, head, repo="."):
                 if mo:
                     msgs.append("F8: %s:%d state wording '%s'." % (p, n, mo.group(0)))
                     break
+            mo = NULL_CLAIM_RX.search(re.sub(r"`[^`]*`|\"[^\"]*\"", "", line))
+            if mo and not PAIRED_RX.search(line):
+                msgs.append("F8: %s:%d '%s' needs paired(n) on the same line (rl/METHOD.md section 1); at screen tier "
+                            "write 'not distinguished at screen tier'." % (p, n, mo.group(0)))
     return not msgs, msgs or ["F8: no state wording on added lines."]
 
 
@@ -273,27 +284,58 @@ def f10_symlinks(repo="."):
     return msgs
 
 
-def f10(repo="."):
-    msgs = f10_symlinks(repo)
-    imp = re.compile(r"^\s*(?:from|import)\s+rl(?:\.|\s|$)")
-    ment = re.compile(r"(?<![A-Za-z0-9_.])rl/")
+F10_IMP = re.compile(r"^\s*(?:from|import)\s+rl(?:\.|\s|$)")
+F10_MENT = re.compile(r"(?<![A-Za-z0-9_.])rl/")
+
+
+def f10_lines(text):
+    return [n for n, line in enumerate(text.split("\n"), 1) if F10_IMP.match(line) or F10_MENT.search(line)]
+
+
+def base_symlink(base, path, repo):
+    """The target of path when it is a symlink at the base commit, else None."""
+    out = common.git(["ls-tree", "-z", base, "--", path], cwd=repo)
+    rec = out.split("\0")[0]
+    if not rec.startswith("120000 "):
+        return None
+    return (common.show(base, path, cwd=repo) or b"").decode("utf-8", "replace")
+
+
+def f10(repo=".", base=None):
+    """Engine files that mention or import rl/, and symlinks that cross between team and engine paths. With base: only
+    what the base does not already have (a symlink new or changed, or more mention lines in a file than at the base)."""
+    links = symlinks(repo) if base else {}
+    msgs = []
+    for m in f10_symlinks(repo):
+        link = m.split(":1 is a symlink", 1)[0][len("F10: "):]
+        if base and base_symlink(base, link, repo) == links.get(link):
+            continue
+        msgs.append(m)
     for p in tracked(repo):
         if common.is_team(p):
             continue
         text = read_text(p, repo)
         if text is None:
             continue
-        for n, line in enumerate(text.split("\n"), 1):
-            if imp.match(line) or ment.search(line):
-                msgs.append("F10: %s:%d mentions or imports rl/." % (p, n))
-                break
-    return not msgs, msgs or ["F10: no engine file mentions rl/, and no symlink crosses between team and engine paths."]
+        lines = f10_lines(text)
+        if not lines:
+            continue
+        if base:
+            old = common.show(base, p, cwd=repo)
+            if old is not None and len(f10_lines(old.decode("utf-8", "replace"))) >= len(lines):
+                continue
+        msgs.append("F10: %s:%d mentions or imports rl/%s." % (p, lines[0], " (more lines than at the base)" if base else ""))
+    if not msgs:
+        return True, ["F10: no engine file mentions rl/, and no symlink crosses between team and engine paths%s."
+                      % (" beyond what the base already has" if base else "")]
+    return False, msgs
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("check", choices=["f7", "f4", "f8", "f10"])
-    ap.add_argument("--base", help="f8: the base; f7, f4: frozen files that exist there are skipped")
+    ap.add_argument("--base", help="f8: the base; f7, f4: frozen files that exist there are skipped; f10: only what the "
+                    "base does not already have")
     ap.add_argument("--head")
     ap.add_argument("--allow", default=os.path.join("rl", "tools", "scrub_allow.txt"))
     ap.add_argument("--repo", default=".")
@@ -305,7 +347,7 @@ def main(argv=None):
             allow = os.path.join(a.repo, a.allow)
             ok, msgs = f4(a.repo, allow if os.path.exists(allow) else None, a.base)
         elif a.check == "f10":
-            ok, msgs = f10(a.repo)
+            ok, msgs = f10(a.repo, a.base)
         else:
             if not (a.base and a.head):
                 print("check_docs: f8 needs --base and --head", file=sys.stderr)

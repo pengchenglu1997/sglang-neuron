@@ -2,6 +2,12 @@
 # The check tools and their fixtures compare bytes and run under bash, so they are checked out with LF on every platform
 # (a Windows clone with core.autocrlf=true would otherwise break two tests).
 rl/tools/** text eol=lf
+# The scripts at the top of rl/ are scanned by the scrub (a carriage return is a hit) and run under bash on the machine:
+# LF on every platform. Every blob of these paths was already LF when this line was added, so no file content changed.
+rl/*.py text eol=lf
+rl/*.sh text eol=lf
+# The project settings and hook of Claude Code (.claude/) are read by bash and by tests: LF on every platform.
+.claude/** text eol=lf
 # The workflow and CODEOWNERS are read by tests that split on LF and by bash: LF on every platform.
 .github/workflows/*.yml text eol=lf
 .github/CODEOWNERS text eol=lf

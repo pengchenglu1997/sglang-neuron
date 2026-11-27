@@ -128,9 +128,9 @@ class Data(unittest.TestCase):
 
     def good_folder(self, extra=None):
         d = "rl/data/2026-12-01_t/"
-        self.r.write(d + "README.md", "r\n")
+        self.r.write(d + "README.md", "r\nServed: none\n")   # F6: a new folder says what it served
         self.r.write(d + "a.csv", "1,2\n")
-        self.r.write(d + "SHA256SUMS", "%s  README.md\n%s  a.csv\n" % (helpers.sha256("r\n"), helpers.sha256("1,2\n")))
+        self.r.write(d + "SHA256SUMS", "%s  README.md\n%s  a.csv\n" % (helpers.sha256("r\nServed: none\n"), helpers.sha256("1,2\n")))
 
     def test_good_folder(self):
         self.good_folder()

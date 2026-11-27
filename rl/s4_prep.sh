@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Session 4 setup (2026-11-26): image, Qwen3-0.6B, Qwen3-8B, GSM8K, llmbench at the pinned commit.
+# LLMBENCH_URL defaults to the repository that 22b_llmbench_grid.sh names; the checkout is pinned to LB_PIN either way.
 # Same commands as the prep step of the session before it, without the vllm image, the 30B fetch and the _alt copies.
 set -u
 cd "$(dirname "${BASH_SOURCE[0]}")" || exit 2
@@ -37,7 +38,7 @@ for s in train test; do
 done
 say "gsm8k lines: $(wc -l "$M"/gsm8k/*.jsonl | tail -n 1)"
 lb="$DATA_ROOT/llmbench"
-[ -d "$lb/.git" ] || git clone "${LLMBENCH_URL:?set LLMBENCH_URL to the llmbench repository named in 22b_llmbench_grid.sh}" "$lb" > "$R/logs/llmbench_clone.out" 2>&1
+[ -d "$lb/.git" ] || git clone "${LLMBENCH_URL:-https://github.com/HolboxAI/llmbench}" "$lb" > "$R/logs/llmbench_clone.out" 2>&1
 git -C "$lb" checkout -q "$LB_PIN" 2>> "$R/logs/llmbench_clone.out"
 [ "$(git -C "$lb" rev-parse HEAD 2>/dev/null)" = "$LB_PIN" ] && say "llmbench at $LB_PIN" || { say "llmbench NOT at pin"; bad=$((bad+1)); }
 export PATH="$HOME/.local/bin:$PATH"

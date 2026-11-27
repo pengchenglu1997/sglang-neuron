@@ -4,12 +4,18 @@
 #   bash rl/tools/upstream_ready.sh <branch> [--base REF] [--skip-tests]
 #
 # 1. The files the branch changes since its merge base with the base (default origin/upstream-main) hold no TEAM path
-#    (rl/**, docs/rl/**, README.md, AGENTS.md, CLAUDE.md, .github/**, .gitattributes). An ancestry test cannot do this,
+#    (rl/**, docs/rl/**, README.md, AGENTS.md, CLAUDE.md, .github/**, .claude/**, .gitattributes). An ancestry test cannot do this,
 #    because upstream-main is a single root commit. A failure of git (no merge base) or of the interpreter is exit 2.
 # 2. The CPU tests of the branch pass, run in a temporary worktree of the branch: python -m pytest -q tests/cpu when
 #    that folder exists, and every tests/**/selftest_*.py script as python <script>. When the branch has neither, the
-#    tests are NOT CHECKED and the branch is not called READY (exit 3). --skip-tests: not run, and the last line says so.
-# Exit status: 0 ready, 1 not ready, 2 bad input or a failed tool, 3 TEAM paths clean but no CPU test found.
+#    tests are NOT CHECKED and the branch is not called READY (exit 3): the change brings its own selftest (template:
+#    rl/tools/selftest_template.py), or the human records the manual check instead. --skip-tests: not run, and the last
+#    line says so. A test that stops on a missing Python module (torch, pytest, ...) is not a failing test: the script
+#    prints "cannot run tests: needs <module>" and exits 2, unless the module is a file or folder of the branch itself
+#    (then the test failed: exit 1). A selftest that still holds the template marker line is NOT READY. The CPU tests need Python 3.11+ with torch (CPU build),
+#    safetensors and pytest (AGENTS.md section 0).
+# Exit status: 0 ready; 1 not ready (a TEAM path, or a test that failed); 2 bad input, a failed tool, or cannot run
+# tests (a missing module); 3 TEAM paths clean but no CPU test found.
 # The checkout and its branches are not changed. The script first changes to the top level of the checkout it is run in.
 set -u
 set -o pipefail
@@ -21,7 +27,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --base) BASE="${2:-}"; shift 2 || { echo "upstream_ready: --base needs a value" >&2; exit 2; } ;;
     --skip-tests) SKIP_TESTS=1; shift ;;
-    -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
     -*) echo "upstream_ready: unknown option $1" >&2; exit 2 ;;
     *) BRANCH="$1"; shift ;;
   esac
@@ -65,6 +71,30 @@ else
 fi
 
 tests_ran=0
+missing=""
+# run_test LABEL CMD...: runs one test in the temporary worktree and prints its output. A failure whose output names a
+# missing Python module is recorded in $missing (cannot run), any other failure sets status=1 (NOT READY).
+run_test() {
+  label="$1"; shift
+  if (cd "$tmp/wt" && "$@") > "$tmp/out" 2>&1; then
+    cat "$tmp/out"; echo "ok: $label passes"; return
+  fi
+  cat "$tmp/out"
+  all="$(grep -oE "No module named '[^']+'" "$tmp/out" | sed -E "s/^No module named '([^'.]+).*/\1/" | sort -u | tr '\n' ' ')"
+  # A module whose top-level name is a file or a folder of the branch is the branch's own code: a failing test.
+  mods=""; own=""
+  for m in $all; do
+    if [ -e "$tmp/wt/$m" ] || [ -e "$tmp/wt/$m.py" ]; then own="$own $m"; else mods="$mods $m"; fi
+  done
+  mods="${mods# }"
+  if [ -n "$mods" ] && [ -z "$own" ]; then
+    echo "cannot run tests: $label needs ${mods% } (a missing Python module, not a failing test)"
+    missing="$missing $mods"
+  else
+    echo "NOT READY: $label failed on $BRANCH"
+    status=1
+  fi
+}
 if [ "$SKIP_TESTS" -eq 1 ]; then
   echo "CPU tests: skipped (--skip-tests)"
 elif [ "$status" -eq 0 ]; then
@@ -82,22 +112,17 @@ elif [ "$status" -eq 0 ]; then
   elif git worktree add --detach "$tmp/wt" "$BRANCH" >/dev/null 2>&1; then
     if [ "$has_cpu" -eq 1 ]; then
       tests_ran=1
-      if (cd "$tmp/wt" && "$PY" -m pytest -q tests/cpu); then
-        echo "ok: pytest tests/cpu passes"
-      else
-        echo "NOT READY: pytest tests/cpu failed on $BRANCH"
-        status=1
-      fi
+      run_test "pytest tests/cpu" "$PY" -m pytest -q tests/cpu
     fi
     while IFS= read -r f; do
       [ -n "$f" ] || continue
       tests_ran=1
-      if (cd "$tmp/wt" && "$PY" "$f"); then
-        echo "ok: $f passes"
-      else
-        echo "NOT READY: $f failed on $BRANCH"
+      if grep -q 'SELFTEST_TEMPLATE_UNCHANGED' "$tmp/wt/$f"; then
+        echo "NOT READY: $f is still the template (delete its header with the marker line, replace the placeholder check)"
         status=1
+        continue
       fi
+      run_test "$f" "$PY" "$f"
     done < "$tmp/selftests.txt"
   else
     echo "upstream_ready: could not create a temporary worktree" >&2
@@ -107,6 +132,11 @@ fi
 
 if [ "$status" -ne 0 ]; then
   exit "$status"
+fi
+if [ -n "$missing" ]; then
+  mods="$(printf '%s\n' $missing | sort -u | tr '\n' ' ')"
+  echo "cannot run tests: needs ${mods% } (install it, see AGENTS.md section 0, then run again): $BRANCH is not called READY"
+  exit 2
 fi
 if [ "$SKIP_TESTS" -eq 1 ]; then
   echo "READY (TEAM-path check only, CPU tests skipped): $BRANCH"

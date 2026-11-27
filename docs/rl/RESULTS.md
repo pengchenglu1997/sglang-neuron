@@ -448,6 +448,7 @@ Headline rows, concurrency 32, tier screen (generated from [`rl/best.tsv`](../..
 | q8_kernel | Qwen3-8B | temperature sampler kernel on, LM head switch off | 1,501.1 and 1,500.2 tok/s at concurrency 32 | q8_vllm: 1,126.9 and 1,112.4 tok/s at concurrency 32 | screen | `rl/data/2026-11-26_trn2/lm_head/results/`: `llmbench_b_lmh_q8_s0k_t0_p1.csv`, `llmbench_b_lmh_q8_s0k_t0_p2.csv` |
 | q8_lmh_on | Qwen3-8B | temperature sampler kernel and pre-transposed LM head on | 1,497.5 and 1,504.1 tok/s at concurrency 32; not distinguished at screen tier | q8_kernel: 1,501.1 and 1,500.2 tok/s at concurrency 32 | screen | `rl/data/2026-11-26_trn2/lm_head/results/`: `llmbench_b_lmh_q8_s1k_t0_p1.csv`, `llmbench_b_lmh_q8_s1k_t0_p2.csv` |
 | q8_vllm | Qwen3-8B | vllm-neuron 0.29.0.1.2.0 | 1,126.9 and 1,112.4 tok/s at concurrency 32 | - | screen | `rl/data/2026-11-26_trn2/serving/`: `llmbench_b_q8_vllm_p1.csv`, `llmbench_b_q8_vllm_p2.csv` |
+| q8_rel | Qwen3-8B | released image (SGLang-Neuron v0.1.0) without fork patches | 1,421.0 and 1,421.3 tok/s at concurrency 32 | - | screen | `rl/data/2026-11-26_trn2/serving/`: `llmbench_b_q8_rel_t0_p1.csv`, `llmbench_b_q8_rel_t0_p2.csv` |
 <!-- best:end -->
 
 Reading (screen tier; differences below 10 percent are not distinguished):

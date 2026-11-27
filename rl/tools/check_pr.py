@@ -107,7 +107,7 @@ def f1(base, labels, paths, sync=None):
         if is_sync:
             return True, ["F1: team-only pull request into integration; every team path equals main (sync from main); no label needed (%s)." % (ev_set[0] if ev_set else "none given")]
         if base != "main":
-            return False, ["F1: a team-only pull request (rl/, docs/rl/, README.md, AGENTS.md, CLAUDE.md, .github/, .gitattributes) must target main, not %s." % base]
+            return False, ["F1: a team-only pull request (rl/, docs/rl/, README.md, AGENTS.md, CLAUDE.md, .github/, .claude/, .gitattributes) must target main, not %s." % base]
         return True, ["F1: team-only pull request into main; no label needed (%s)." % (ev_set[0] if ev_set else "none given")]
     if len(ev) != 1:
         return False, ["F1: an engine path is changed (%s%s); exactly one of the labels cpu-only or hardware-verified is required (found %d)."
