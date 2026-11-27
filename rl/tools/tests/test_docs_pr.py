@@ -167,10 +167,13 @@ class GeneratedBlocksOfTheRealDocs(unittest.TestCase):
         self.assertIn("**`once`**", self.read("rl/METHOD.md"))
         self.assertNotIn("1e-5", self.read("docs/rl/KERNELS.md"))
 
-    def test_team_checks_job_fails_only_for_base_main(self):
+    def test_team_checks_job_fails_on_every_base(self):
+        # The job used to be report-only for base integration; now only F5 switches and F10 are, and only there
+        # (test_acceptance.ChecksJobOnEveryBase replays the violating pull requests).
         text = self.read(".github/workflows/team-checks.yml")
-        self.assertIn('[ "$BASE_REF" != main ]', text)
-        self.assertLess(text.index('[ "$BASE_REF" != main ]'), text.rindex('exit "$fail"'))
+        self.assertNotIn('[ "$BASE_REF" != main ]', text)
+        self.assertIn('if [ "$BASE_REF" != integration ]; then step "$@"; return; fi', text)
+        self.assertNotIn("exit 0\n", text.split("Team checks F2-F8 and F10", 1)[1])
         self.assertNotIn("test_docs_blocks", text)
 
     def test_no_hand_written_state_table_is_left_in_the_readme(self):
