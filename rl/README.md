@@ -19,7 +19,7 @@ level because the records, `backends.json` and every script's `sys.path` name th
 | Server launchers | `srv_sglang_neuron.sh`, `srv_vllm_neuron_docker.sh`, `srv_sglang_cuda_docker.sh`, `srv_other.sh`, `nki_index_check.py` | one script per engine |
 | Probes | `20_` to `82_*.py` and `*.sh` | one script per timing or correctness question; see `docs/EXPERIMENTS.md` |
 | Session scripts | `50_run_trn2_session.sh`, `run_night_1121.sh`, `run_shape_1122.sh`, `run_w1w2.sh`, `r9_run.sh`, `s4_*.sh`, `s4_*.py`, `scripts/` | the order in which probes ran on one machine, as run |
-| Benchmark client | `22_llmbench.sh`, `22b_llmbench_grid.sh` | llmbench grid (the setting is in `METHOD.md` section 6) |
+| Benchmark client | `22_llmbench.sh`, `22b_llmbench_grid.sh` | llmbench grid (the setting is in `METHOD.md` section 7) |
 | Patch folders | `make_patch_dir.py`, `patch_manifest.py`, `patches/` | build the folder a server mounts from a fork commit; `patches/` is the frozen as-run in-place patch |
 | Weight and checkpoint tools | `lora_merge.py`, `mk_ulp.py`, `untie_ckpt.py` | merge an adapter, perturb or untie a checkpoint |
 | Report helpers | `60_report_figures.py`, `59b_` to `59d_`, `63_padding_share.py`, `77_pair_table.py`, `81_opt_table.py` | tables and figures read from result files |
