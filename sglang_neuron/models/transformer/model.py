@@ -313,7 +313,13 @@ class TransformerForCausalLM(nn.Module):
 
     def reload_weights(self, checkpoint_path: str) -> None:
         """Copy this rank's shard of every mapped parameter from ``checkpoint_path`` into the loaded device parameters,
-        which the compiled graphs hold, so no graph is rebuilt or recompiled. The shards are read on the host."""
+        which the compiled graphs hold, so no graph is rebuilt or recompiled. The shards are read on the host.
+
+        A tied model with SGLANG_NEURON_LM_HEAD_PRETRANSPOSED=1 holds two copies of the vocabulary table: the
+        embedding's [V / tp, H] shard and the LM head's own [H, V / tp] one. Both are mapped to the embedding's
+        checkpoint tensor (``hf_weight_mappings``) and keep their loaders across ``load_weights``, so both are in
+        ``state`` and both are copied here. With the switch off the LM head is the embedding's parameter, and the one
+        copy into it serves both."""
         checkpoint = SafetensorsCheckpoint(checkpoint_path)
         state = checkpoint.load_sharded_pipelined(self.tp_group.rank_in_group, self.tp_group.world_size, self,
                                                   self.hf_weight_mappings(), torch.device("cpu")).state_dict
