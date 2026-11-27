@@ -1,0 +1,4 @@
+# Switches whose default is not off, accepted on purpose (F5, rl/tools/switches.py --check).
+# One line per switch: <NAME><TAB><reason>. A new path sits behind a switch that is off by default (rl/METHOD.md);
+# a switch that defaults to on or to a mode name needs a line here. Adding one is a tier-3 change (rl/tools/).
+# main holds no such switch; the two branch-only switches that default to on are listed when they reach main.
