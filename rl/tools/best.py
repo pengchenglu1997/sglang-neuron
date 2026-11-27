@@ -129,6 +129,11 @@ def load(root):
         for col in ("label", "model"):
             if HUB_ID_RX.search(r[col]):
                 problems.append("%s: %s cites a hub row id or the hub" % (k, col))
+        metric = r["selector"].split(":", 1)[0]
+        if metric not in UNITS:
+            problems.append("%s: metric %r is not one of %s" % (k, metric, ", ".join(sorted(UNITS))))
+            r["files"], r["values"] = [], []
+            continue
         r["files"] = [f for f in r["file"].split(";") if f]
         if not r["files"]:
             problems.append("%s: no file" % k)
@@ -222,13 +227,17 @@ def read_doc(root, rel):
 
 
 def split_keep(text):
-    eol = "\r\n" if "\r\n" in text else "\n"
-    return text.split(eol), eol
+    """(lines without their line end, the file's line end). A file that mixes CRLF and LF is refused: a block pasted
+    with the other line end would otherwise not be found, and the check would pass without looking."""
+    crlf = text.count("\r\n")
+    if crlf and text.count("\n") != crlf:
+        raise BadInput("mixed line endings (CRLF and LF); make them one kind")
+    return [l[:-1] if l.endswith("\r") else l for l in text.split("\n")], ("\r\n" if crlf else "\n")
 
 
 def check_doc(root, rel, rows, require):
-    lines, _ = split_keep(read_doc(root, rel))
     try:
+        lines, _ = split_keep(read_doc(root, rel))
         pos = find_block(lines)
     except BadInput as e:
         return ["%s: %s" % (rel, e)], None

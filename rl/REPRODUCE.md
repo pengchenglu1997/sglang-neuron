@@ -1,7 +1,7 @@
 # Reproduce the Qwen3-0.6B number of the trn2 session of 2026-11-26
 
 Target: the pre-transposed LM head plus the temperature sampler kernel, Qwen3-0.6B, TP4 on one chip, prompt 1,024,
-256 output tokens, concurrency 32, tier `screen` (two passes on one server start): the `q06_best` row of
+256 output tokens, concurrency 32, tier `screen` (two passes on one server start): the `q06_lmh_on` row of
 [`best.tsv`](best.tsv), from `data/2026-11-26_trn2/lm_head/results/llmbench_b_lmh_q06_s1k_t0_p1.csv` and `_p2.csv`
 (`python rl/tools/best.py` prints both values).
 

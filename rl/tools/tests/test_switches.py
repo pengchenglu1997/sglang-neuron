@@ -140,6 +140,21 @@ class SwitchesTest(unittest.TestCase):
         self.assertIn("not checked", out)
         self.assertEqual(self.run_main("--check", "README.md", "--branch", "work", "--require-block")[0], 1)
 
+    def test_mixed_line_endings_are_refused_and_a_crlf_block_is_found(self):
+        self.r.write("rl/tools/switches_exceptions.txt", "NEW_LADDER_FLAG\tr\nNEW_MODE_FLAG\tr\n")
+        self.r.write("README.md", "a\r\n" + switches.BEGIN + "\r\nold\r\n" + switches.END + "\r\nz\r\n")
+        self.r.commit("readme")
+        self.assertEqual(self.run_main("--write", "README.md", "--branch", "work=main")[0], 0)
+        self.assertEqual(self.run_main("--check", "README.md", "--branch", "work=main", "--require-block")[0], 0)
+        path = os.path.join(self.r.dir, "README.md")
+        with open(path, "rb") as fh:
+            raw = fh.read()
+        with open(path, "wb") as fh:
+            fh.write(raw.replace(b"\r\n", b"\n", 2))
+        code, out = self.run_main("--check", "README.md", "--branch", "work=main")
+        self.assertEqual(code, 1, out)
+        self.assertIn("mixed line endings", out)
+
     def test_unknown_base_and_branch_are_bad_input(self):
         out, err = io.StringIO(), io.StringIO()
         with redirect_stdout(out), redirect_stderr(err):

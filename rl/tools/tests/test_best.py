@@ -165,6 +165,29 @@ class BestTest(unittest.TestCase):
         self.doc("README.md", best.BEGIN + "\ntext\n")
         self.assertEqual(self.run_main("--check", "README.md")[0], 1)
 
+    def test_lf_block_in_a_crlf_file_is_found_and_checked(self):
+        self.good()
+        self.doc("README.md", "a\r\n" + best.BEGIN + "\r\nold\r\n" + best.END + "\r\nz\r\n")
+        self.assertEqual(self.run_main("--write", "README.md")[0], 0)
+        code, out = self.run_main("--check", "README.md", "--require-block")
+        self.assertEqual(code, 0, out)
+
+    def test_mixed_line_endings_are_refused(self):
+        self.good()
+        wrong = best.BEGIN + "\n| k_a | M | x | 9,999.9 tok/s | - | screen | f |\n" + best.END
+        self.doc("README.md", "a\r\n" + wrong + "\r\nz\r\n")
+        code, out = self.run_main("--check", "README.md")
+        self.assertEqual(code, 1, out)
+        self.assertIn("mixed line endings", out)
+        self.assertEqual(self.run_main("--write", "README.md")[0], 2)
+
+    def test_selector_metric_must_be_a_known_one(self):
+        self.data("s/e_p1.csv", csv_text(100.0, n_error=5))
+        self.tsv(("k_a", "x", "M", "s/e_p1.csv", "n_error:concurrency=32", "-", "screen"))
+        code, out = self.run_main("--check")
+        self.assertEqual(code, 1, out)
+        self.assertIn("metric", out)
+
     def test_real_repository_rows_are_sound(self):
         root = os.path.dirname(os.path.dirname(helpers.TOOLS))
         code, out = self.run_real(root)

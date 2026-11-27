@@ -268,8 +268,12 @@ def read_doc(root, rel):
 
 
 def split_keep(text):
-    eol = "\r\n" if "\r\n" in text else "\n"
-    return text.split(eol), eol
+    """(lines without their line end, the file's line end). A file that mixes CRLF and LF is refused: a block pasted
+    with the other line end would otherwise not be found, and the check would pass without looking."""
+    crlf = text.count("\r\n")
+    if crlf and text.count("\n") != crlf:
+        raise BadInput("mixed line endings (CRLF and LF); make them one kind")
+    return [l[:-1] if l.endswith("\r") else l for l in text.split("\n")], ("\r\n" if crlf else "\n")
 
 
 def branch_specs(root, specs):
@@ -310,8 +314,12 @@ def main(argv=None):
                                     % (s["name"], s["default"], a.exceptions.replace("\\", "/")))
             want = render_block(sw)
             for rel in a.check:
-                lines, _ = split_keep(read_doc(a.root, rel))
-                pos = find_block(lines)
+                try:
+                    lines, _ = split_keep(read_doc(a.root, rel))
+                    pos = find_block(lines)
+                except BadInput as e:
+                    problems.append("%s: %s" % (rel, e))
+                    continue
                 if pos is None:
                     if a.require_block:
                         problems.append("%s: no switches block (markers missing)" % rel)
