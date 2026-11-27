@@ -268,7 +268,7 @@ Status: written and tested on the CPU and in the NKI 0.7.0 simulator only. Not r
 results are recorded in the team hub, not here (cpu-only work). Branch `feat/sampler-kernel-topk-topp`, a `cpu-only`
 pull request to `integration`; switch `RLKIT_SAMPLER_KERNEL_TOPK=1` (unset or 0: the released function body runs).
 
-What it replaces. Of the shard-local stage of `sample_filtered_sharded_logits` (`sampling.py` v0.1.0, lines 372-386)
+What it replaces. Of the shard-local stage of `sample_filtered_sharded_logits` (`sampling.py` v0.1.0, lines 364-378)
 only the unfiltered draw: the per-column hash noise, the Gumbel score, the shard maximum and its smallest id. These come
 from `gumbel_partials`, the `temperature` mode's kernel, called unchanged; the merge is the engine's tie rule, as in that
 mode. New file `sglang_neuron/rlkit_sampler_topk.py`; it holds no NKI code. The temperature kernel's file is not changed,
@@ -280,20 +280,26 @@ What stays the engine's torch code, and why:
 - the shard pool top-k (`_pool_topk`: on a device nkilib's rotational kernel where one fits the shape, else the
   reduction-based `_exact_topk`), the raw-logit gather, and every line after
   the payload (all-gather, shard winner, pool sort, cumulative probability, keep mask, pool draw with torch noise,
-  logprobs, top logprobs), copied verbatim from v0.1.0 lines 387-416; a test checks the text.
+  logprobs, top logprobs), copied verbatim from v0.1.0 lines 379-408; a test checks the text.
+
+Limits. At most 128 rows per call (the kernel's partitions; it has no row tiling), so a server with the switch on needs
+`--max-running-requests` of 128 or less. More rows raise a `RuntimeError` that names `RLKIT_SAMPLER_KERNEL_TOPK`; the
+released `topk_topp` path has no such limit. Row keys must lie in [0, 2**31), as `noise_row_keys` makes them.
 
 Consequence. A restricted sampled row (top-k below SGLang's "all" value, top-p below 1 or min-p above 0, temperature
 above 0) gets its token and logprob from the released code on the same inputs: the kernel's result is not read for it
 (a test puts garbage in place of the kernel's result and these rows stay bit-equal). The kernel's result is read for
-temperature-0 rows (max and smallest id: exact) and for unrestricted sampled rows (noise from the kernel's own `log`,
-which in the simulator differs from `torch.log` in the last bits for some inputs, so a near-tie can be drawn
-differently; on hardware the `temperature` mode gave 44 of 60 equal sequences at the same seeds, section above).
+temperature-0 rows (max and smallest id: exact) and for unrestricted sampled rows (noise from the kernel's own `log`;
+in the simulator that `log` differs from `torch.log` in the last bits for some inputs, and a simulator run can then
+draw another token for such a row). On hardware the `temperature` mode gave 44 of 60 equal sequences at the same seeds
+(section above); that is an observed difference whose cause was not examined (RESULTS.md), and nothing here explains it.
 
 Tests (`tests/rlkit_sampler/selftest_sampler_topk.py`; method and list in `tests/rlkit_sampler/README.md`): against the
 released `topk_topp` path over a simulated TP4 group, bit-equal outputs with the kernel's CPU reference for top-k 1 / 50 /
-256 / off, top-p 0.5 / 0.95 / 1, min-p 0 / 0.1, temperature-0 rows, mixed per-row settings, ties, rows 1 / 8 / 32; the
-switch unset leaves the released path; planted faults are caught; in the simulator, restricted rows bit-equal and
-temperature-0 tokens equal. Whether these hold on a device is not known.
+256 / off, top-p 0.5 / 0.95 / 1, min-p 0 / 0.1, temperature-0 rows, mixed per-row settings, ties, rows 1 / 8 / 32, a padded
+vocabulary, non-finite logits (-inf, +inf, NaN); the switch unset leaves the released path and the switch on gives the
+released output; 129 rows raise the error that names the switch; planted faults are caught; in the simulator, restricted
+rows bit-equal and temperature-0 tokens and logprobs equal (also on the padded and non-finite inputs). Whether these hold on a device is not known.
 
 Compile flags. `models/host.py` (`neuron_compiler_args`) keeps the default arguments for a decode that traces the device
 top-k, which `topk_topp` always does, because `-O2` miscompiles that top-k (section "The compile-flag question" below).

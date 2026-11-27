@@ -10,7 +10,7 @@ torch.topk (what the released _pool_topk runs on a CPU tensor; the real module i
 does not have), a copy of this repository's rlkit_sampler_topk.py, and this repository's sampling.py under other module
 names (for the switch tests). Then, at the TP4 shard width 37,984, against the released sample_filtered_sharded_logits:
   K0  switch: unset and "0" run the released function body (outputs bit-equal, rlkit_sampler_topk never imported);
-      "1" routes to the kernel path
+      "1" routes to the kernel path, whose output is bit-equal to the released output (CPU reference stage)
   K1  whole output dict bit-equal (token ids, logprobs, top logprobs) on every rank, kernel stage =
       gumbel_partials_reference: top-k {1, 50, 256, off} x top-p {0.5, 0.95, 1} x min-p {0, 0.1}, temperatures
       0 / 0.6 / 0.8 / 1.0, rows 1 / 8 / 32
@@ -24,8 +24,11 @@ names (for the switch tests). Then, at the TP4 shard width 37,984, against the r
   K6  source checks: this repository's sampling.py = released + the two guarded branches only; every other function of
       it has the released bytecode; the tail of the kernel path is the released text verbatim
   K7  backend/compile_cache.py counts rlkit_sampler_topk.py among the kernel sources (so the cache digest changes)
+  K8  padded vocabulary (width * world > vocab, large values in the padded columns) and non-finite logits (-inf
+      columns, a whole -inf shard, +inf, NaN): whole output bit-equal
+  K9  128 rows run; 129 rows raise an error that names RLKIT_SAMPLER_KERNEL_TOPK
   --sim  (WSL with nki 0.7.0): the kernel stage is the NKI kernel in nki.simulate; restricted rows must be bit-equal,
-         greedy rows must have equal tokens, unrestricted sampled rows are counted (the simulator's log is not torch.log)
+         greedy rows must have equal tokens and logprobs (also on the K8 inputs), unrestricted sampled rows are counted (the simulator's log is not torch.log)
 Exit 0 when every test passes. No device, no docker, no network.
 """
 from __future__ import annotations
@@ -105,14 +108,14 @@ def make_keys(S, rows, gen):
                             torch.randint(0, 4096, (rows,), generator=gen))
 
 
-def released_fn(S, temps, keys, filters, top_logprobs):
-    return lambda sh, g, r: S.sample_filtered_sharded_logits(sh, g, r, VOCAB, temps, keys, filters,
+def released_fn(S, temps, keys, filters, top_logprobs, vocab=VOCAB):
+    return lambda sh, g, r: S.sample_filtered_sharded_logits(sh, g, r, vocab, temps, keys, filters,
                                                              top_logprobs=top_logprobs)
 
 
-def kernel_fn(S, K, T, temps, keys, filters, top_logprobs, partials=None):
+def kernel_fn(S, K, T, temps, keys, filters, top_logprobs, partials=None, vocab=VOCAB):
     partials = partials or K.gumbel_partials_reference
-    return lambda sh, g, r: T.sample_filtered_sharded_logits_kernel(sh, g, r, VOCAB, temps, keys, filters,
+    return lambda sh, g, r: T.sample_filtered_sharded_logits_kernel(sh, g, r, vocab, temps, keys, filters,
                                                                     top_logprobs, S.TOP_K_MAX, partials_fn=partials)
 
 
@@ -142,10 +145,10 @@ def row_classes(S, temps, filters):
     return restricted, sampled & ~restricted, ~sampled
 
 
-def compare(S, K, T, logits, temps, keys, filters, top_logprobs=0, partials=None, kernel_filters=None):
-    e = B.run_tp(released_fn(S, temps, keys, filters, top_logprobs), logits, temps, keys)
+def compare(S, K, T, logits, temps, keys, filters, top_logprobs=0, partials=None, kernel_filters=None, vocab=VOCAB):
+    e = B.run_tp(released_fn(S, temps, keys, filters, top_logprobs, vocab), logits, temps, keys)
     kf = filters if kernel_filters is None else kernel_filters
-    k = B.run_tp(kernel_fn(S, K, T, temps, keys, kf, top_logprobs, partials), logits, temps, keys)
+    k = B.run_tp(kernel_fn(S, K, T, temps, keys, kf, top_logprobs, partials, vocab), logits, temps, keys)
     return e, k, row_mismatch(e, k)
 
 
@@ -208,8 +211,10 @@ def k0(S, scratch: Path):
             got = B.run_tp(released_fn(P, temps, keys, filters, 0), logits, temps, keys)
         finally:
             T.sample_filtered_sharded_logits_kernel = real
-        ok = P._RLKIT_SAMPLER_KERNEL_TOPK is True and len(calls) == 2 * WORLD
-        info.append(f"{SWITCH}=1: flag {P._RLKIT_SAMPLER_KERNEL_TOPK}, kernel path calls {len(calls)}")
+        routed_equal = all(same_dict(a, b) for a, b in zip(want, got))   # routed output = released output
+        ok = P._RLKIT_SAMPLER_KERNEL_TOPK is True and len(calls) == 2 * WORLD and routed_equal
+        info.append(f"{SWITCH}=1: flag {P._RLKIT_SAMPLER_KERNEL_TOPK}, kernel path calls {len(calls)}, routed output "
+                    f"bit-equal to the released output {routed_equal}")
         ok_all &= ok
     finally:
         if saved is None:
@@ -413,7 +418,8 @@ def k6(S, src_orig: bytes, scratch: Path):
     end = released.index("    return result\n", start) + len("    return result\n")
     tail = released[start:end]
     body = (PKG / "rlkit_sampler_topk.py").read_text(encoding="utf-8")
-    return check("K6c kernel path tail = released sample_filtered_sharded_logits lines 387-416, verbatim", tail in body,
+    return check("K6c kernel path tail = released (v0.1.0) sample_filtered_sharded_logits lines 379-408, verbatim",
+                 tail in body,
                  f"{tail.count(chr(10))} lines")
 
 
@@ -424,6 +430,77 @@ def k7(repo: Path):
     want = {"sglang_neuron/rlkit_sampler_topk.py", "sglang_neuron/rlkit_sampler_kernel.py", "sglang_neuron/sampling.py"}
     return check("K7 compile_cache.kernel_sources counts rlkit_sampler_topk.py, rlkit_sampler_kernel.py, sampling.py",
                  want <= names, f"missing {sorted(want - names)}; digest {cc.kernel_sources_digest(repo, ['probe'])}")
+
+
+# ----------------------------------------------------------------------------------------------- K8 K9 edge inputs
+def edge_batches(S, gen, rows_list):
+    """(name, logits, temps, keys, filters, vocab): a padded vocabulary (width * world > vocab; the padded columns hold
+    a large value, so a missing mask would show) and non-finite logits (-inf columns, a whole -inf shard, +inf, NaN).
+    Row 0 is temperature 0, row 1 is an unrestricted sampled row, row 2 a restricted sampled row; the rest are random."""
+    for rows in rows_list:
+        keys = make_keys(S, rows, gen)
+        temps, filters = random_settings(S, rows, gen)
+        for i, (t, f) in enumerate(((0.0, (50.0, 0.95, 0.0)), (0.8, (float(S.TOP_K_ALL), 1.0, 0.0)),
+                                    (0.8, (50.0, 0.95, 0.0)))):
+            if i < rows:
+                temps[i], filters[i] = t, torch.tensor(f)
+        for vocab in (VOCAB - 1000, 3 * WIDTH + 100):          # last rank: 36,984 valid columns; 100 valid columns
+            lg = make_logits(rows, gen)
+            lg[:, vocab:] = 50.0
+            yield f"padded vocabulary {vocab} (width*world {VOCAB}) rows={rows}", lg, temps, keys, filters, vocab
+        lg = make_logits(rows, gen)
+        lg[:, ::7] = float("-inf")
+        yield f"-inf in every 7th column rows={rows}", lg, temps, keys, filters, VOCAB
+        lg = make_logits(rows, gen)
+        lg[:, WIDTH:2 * WIDTH] = float("-inf")
+        yield f"a whole shard (rank 1) -inf rows={rows}", lg, temps, keys, filters, VOCAB
+        lg = make_logits(rows, gen)
+        lg[:, 100:140] = float("-inf")
+        lg[0, 5000] = 20.0                                       # the greedy row's maximum is a finite value
+        yield f"-inf block next to a finite maximum rows={rows}", lg, temps, keys, filters, VOCAB
+        lg = make_logits(rows, gen)
+        lg[3 % rows, 5000] = float("inf")
+        yield f"+inf in one column of one row rows={rows}", lg, temps, keys, filters, VOCAB
+        lg = make_logits(rows, gen)
+        lg[3 % rows, 777] = float("nan")
+        yield f"NaN in one column of one row rows={rows}", lg, temps, keys, filters, VOCAB
+
+
+def k8(S, K, T):
+    """CPU reference stage, whole output bit-equal (NaN compared by bits), for every edge batch."""
+    gen = torch.Generator().manual_seed(2718)
+    ok_all, info = True, []
+    for name, logits, temps, keys, filters, vocab in edge_batches(S, gen, (1, 8, 32)):
+        _, _, bad = compare(S, K, T, logits, temps, keys, filters, top_logprobs=20, vocab=vocab)
+        info.append(f"{name}: {int(bad.sum())} rows differ")
+        ok_all &= not bad.any()
+        if vocab != VOCAB and logits.shape[0] == 8:       # the padded columns are visible: without the mask, tokens move
+            e = B.run_tp(released_fn(S, temps, keys, filters, 0, vocab), logits, temps, keys)
+            u = B.run_tp(released_fn(S, temps, keys, filters, 0, VOCAB), logits, temps, keys)
+            moved = int(row_mismatch(e, u).sum())
+            info.append(f"{name}: unmasked run differs in {moved} rows")
+            ok_all &= moved > 0 and all(int(x["token_ids"].max()) < vocab for x in e)
+    return check("K8 padded vocabulary and non-finite logits: bit-equal to the released path (CPU reference stage)",
+                 ok_all, "; ".join(i for i in info if not i.endswith(" 0 rows differ")) or f"{len(info)} batches")
+
+
+def k9(S, K, T):
+    """128 rows run; 129 rows raise a RuntimeError that names RLKIT_SAMPLER_KERNEL_TOPK (not RLKIT_SAMPLER_KERNEL)."""
+    gen = torch.Generator().manual_seed(129)
+    out = []
+    for rows in (128, 129):
+        logits, keys = make_logits(rows, gen), make_keys(S, rows, gen)
+        temps, filters = torch.full((rows,), 0.8), make_filters(S, rows, 50, 0.95, 0.0)
+        try:
+            B.run_tp(kernel_fn(S, K, T, temps, keys, filters, 0), logits, temps, keys)
+            out.append((rows, None))
+        except RuntimeError as exc:
+            out.append((rows, str(exc)))
+    msg = out[1][1] or ""
+    ok = (out[0][1] is None and "RLKIT_SAMPLER_KERNEL_TOPK" in msg and "128" in msg
+          and "unset RLKIT_SAMPLER_KERNEL)" not in msg)
+    return check("K9 128 rows run; 129 rows raise an error that names RLKIT_SAMPLER_KERNEL_TOPK", ok,
+                 f"128 rows: {'ran' if out[0][1] is None else out[0][1]}; 129 rows: {msg or 'no error'}")
 
 
 # ----------------------------------------------------------------------------------------------- SIM
@@ -469,14 +546,25 @@ def sim_tests(S, K, T):
                 for a, b in zip(e, k):
                     d = a["token_ids"] != b["token_ids"]
                     tok_bad = d if tok_bad is None else tok_bad | d
-                ok &= not bad[restricted].any() and not tok_bad[greedy].any()
-                for i, (m, wrong) in enumerate(((restricted, bad), (greedy, tok_bad), (unrestricted, tok_bad))):
+                ok &= not bad[restricted].any() and not bad[greedy].any()      # greedy: token and logprob
+                for i, (m, wrong) in enumerate(((restricted, bad), (greedy, bad), (unrestricted, tok_bad))):
                     n[2 * i] += int((m & ~wrong).sum())
                     n[2 * i + 1] += int(m.sum())
             ok_all &= ok
             check(f"SIM rows={rows} {name}, 3 batches", ok,
-                  f"restricted rows bit-equal {n[0]}/{n[1]}, temperature-0 rows same token {n[2]}/{n[3]}, unrestricted "
+                  f"restricted rows bit-equal {n[0]}/{n[1]}, temperature-0 rows same token and logprob {n[2]}/{n[3]}, unrestricted "
                   f"sampled rows same token {n[4]}/{n[5]} (counted, not required), {time.time() - t0:.1f}s")
+    for name, logits, temps, keys, filters, vocab in edge_batches(S, gen, (8,)):
+        t0 = time.time()
+        e, k, bad = compare(S, K, T, logits, temps, keys, filters, partials=sim_partials, vocab=vocab)
+        restricted, unrestricted, greedy = row_classes(S, temps, filters)
+        ok = not bad[restricted].any() and not bad[greedy].any()
+        ok_all &= ok
+        check(f"SIM edge: {name}", ok,
+              f"restricted rows bit-equal {int((restricted & ~bad).sum())}/{int(restricted.sum())}, temperature-0 rows "
+              f"same token and logprob {int((greedy & ~bad).sum())}/{int(greedy.sum())}, unrestricted sampled rows "
+              f"equal {int((unrestricted & ~bad).sum())}/{int(unrestricted.sum())} (counted, not required), "
+              f"{time.time() - t0:.1f}s")
     check("SIM kernel stage really is the simulator (informational)", True,
           f"best partials not bit-equal to the CPU reference: {best_cols[0]} of {best_cols[1]}")
     return ok_all
@@ -506,6 +594,8 @@ def main():
         k6(S, src, scratch)
         k7(Path(a.repo))
         k3(S, K, T)
+        k8(S, K, T)
+        k9(S, K, T)
         k4(S, K, T)
         k5(S, K, T)
         k2(S, K, T, a.seeds)

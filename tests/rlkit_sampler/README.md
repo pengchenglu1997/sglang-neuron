@@ -238,15 +238,20 @@ exp-sum, which differs from torch in the last bits, could move a row across a to
 that a restricted sampled row (top-k below the "all" value, top-p below 1 or min-p above 0) gets its token and logprob
 from the released code on the same inputs, whatever the kernel computes. The kernel's result is read only for
 temperature-0 rows (a max and a smallest id, exact) and for unrestricted sampled rows (noise from the kernel's own `log`;
-the simulator's `log` is not `torch.log` bit for bit, so such a row can draw another token at a near-tie, as the
-temperature mode does on hardware). The kernel's log-sum-exp partials are still computed and not used. In the RL setting
+the simulator's `log` is not `torch.log` bit for bit, so in the simulator such a row can draw another token). On
+hardware the temperature mode gave a difference in whole sequences whose cause was not examined (RESULTS.md); this page
+does not explain it. The kernel's log-sum-exp partials are still computed and not used. In the RL setting
 (every sampled row restricted) the kernel's noise pass is work whose result is thrown away; removing it needs a
 kernel without the noise, or a runtime skip, which this branch does not have.
+
+Limits of this mode: at most 128 rows per call (the kernel has no row tiling), so a server with the switch on needs
+`--max-running-requests` of 128 or less; more rows raise a `RuntimeError` naming `RLKIT_SAMPLER_KERNEL_TOPK`, while the
+released path has no such limit. Row keys must lie in [0, 2**31), as `noise_row_keys` makes them.
 
 Tests, `tests/rlkit_sampler/selftest_sampler_topk.py` (CPU; `--sim` adds the NKI simulator), against the released
 `sample_filtered_sharded_logits` over a simulated TP4 group:
 - K0: the switch unset or `0` runs the released body (bit-equal outputs, the new module never imported); `1` routes to
-  the kernel path.
+  the kernel path, whose output (CPU reference stage) is bit-equal to the released output.
 - K1, K2: with the CPU reference of the kernel, the whole output (token ids, logprobs, top logprobs) is bit-equal for
   top-k 1 / 50 / 256 / off, top-p 0.5 / 0.95 / 1, min-p 0 / 0.1, temperatures 0 / 0.6 / 0.8 / 1.0, rows 1 / 8 / 32,
   mixed per-row settings in one batch, top logprobs 0 and 20, and `SGLANG_RETURN_ORIGINAL_LOGPROB` off and on.
@@ -258,8 +263,11 @@ Tests, `tests/rlkit_sampler/selftest_sampler_topk.py` (CPU; `--sim` adds the NKI
 - K6: `sampling.py` is the released file plus the two guarded branches; its other functions have the released bytecode;
   the copied tail is the released text.
 - K7: `backend/compile_cache.py` counts `rlkit_sampler_topk.py` among the kernel sources.
+- K8: a padded vocabulary (width times world above the vocabulary size, large values in the padded columns) and
+  non-finite logits (-inf columns, a whole -inf shard, +inf, NaN): the whole output is bit-equal.
+- K9: 128 rows run; 129 rows raise an error that names `RLKIT_SAMPLER_KERNEL_TOPK`.
 - SIM: the kernel stage is the NKI kernel in `nki.simulate`. Restricted rows must be bit-equal and temperature-0 rows
-  must have equal tokens; unrestricted sampled rows are counted, not required.
+  must have equal tokens and logprobs, also on the K8 inputs; unrestricted sampled rows are counted, not required.
 `selftest_sampler_kernel.py`'s T5 now allows the second guarded branch.
 
 Compile cache. `sampling.py` and the new file are kernel sources in the cache digest (`kernel_sources` follows the
