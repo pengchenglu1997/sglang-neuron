@@ -1,0 +1,42 @@
+# Accepted hits of the public-content checks, repository-wide. One line per entry, tab-separated:
+#   <path><TAB><pattern name><TAB><reason>[<TAB><matched text>]
+# The path is relative to the repository root. The pattern name is one of scrub_check.py's, or public-cpu-lint.
+# scrub_check.py: with a matched text, only a hit equal to it is accepted; without it, every hit of that pattern in the
+#   file is (use that only for a file that is all one case).
+# public-cpu-lint (check_docs.py f4): the fourth field is required and is the line itself, with runs of white space
+#   collapsed to one space. An entry accepts that line only; the failure message prints the text to paste.
+# An entry needs a reason; adding one is a tier-2 change. The reason column is scanned like any other text.
+.github/workflows/team-checks.yml	user-at-host	uses: lines pin GitHub actions by commit sha, they do not name a user at a host	checkout@
+.github/workflows/team-checks.yml	user-at-host	uses: lines pin GitHub actions by commit sha, they do not name a user at a host	setup-python@
+rl/tools/scrub_check.py	arn	the scrubber is scanned too; its docstring and pattern table must spell out what each pattern looks for	arn:aws
+rl/tools/scrub_check.py	user-at-host	the scrubber is scanned too; its docstring and pattern table must spell out what each pattern looks for	user@
+rl/tools/scrub_check.py	key-file	the scrubber is scanned too; its docstring and pattern table must spell out what each pattern looks for	.pem
+rl/tools/scrub_check.py	key-file	the scrubber is scanned too; its docstring and pattern table must spell out what each pattern looks for	.ppk
+rl/tools/scrub_check.py	key-file	the scrubber is scanned too; its docstring and pattern table must spell out what each pattern looks for	id_rsa
+rl/tools/scrub_check.py	price	the scrubber is scanned too; its docstring and pattern table must spell out what each pattern looks for	USD
+rl/tools/scrub_check.py	price	the scrubber is scanned too; its docstring and pattern table must spell out what each pattern looks for	on-demand
+rl/tools/scrub_check.py	price	the scrubber is scanned too; its docstring and pattern table must spell out what each pattern looks for	spot price
+# Imported run-repository files (false positives of the import; the data files are frozen, so the entry is the fix)
+rl/data/2026-11-21_night/59d_devprof_sum.txt	account-id-12-digits	adjusted_hardware_flops is a count of operations, not an account id	103781515264
+rl/data/2026-11-24_trn2/80_moe30b_r8.jsonl	ipv4	the default gateway address of the container bridge network, printed by the server's request log; not a machine address	172.17.0.1
+rl/data/2026-11-26_trn2/correctness/logs/collect_q8_all.out	other-home-folder	a path wrapped across two lines of the log; the folder is the image's default user folder (accepted in the session folder's own scrub_allow.txt)	/home/u
+rl/data/2026-11-26_trn2/correctness/logs/collect_q8_rel.out	other-home-folder	a path wrapped across two lines of the log; the folder is the image's default user folder (accepted in the session folder's own scrub_allow.txt)	/home/u
+rl/data/2026-11-26_trn2/i37_topk_kernel/results/logs/collect_r2_koff_b.out	other-home-folder	a path wrapped across two lines of the log; the folder is the image's default user folder (accepted in the session folder's own scrub_allow.txt)	/home/ubu
+rl/data/2026-11-26_trn2/i29_compiler_args/i29_q06_topk_cold/inspect_i29_q06_topk_cold.json	other-home-folder	a hidden folder of the container image's PATH, not a user name	/home/.openmpi
+rl/data/2026-11-26_trn2/scrub_allow.txt	other-home-folder	the session folder's own scrub record quotes the accepted text	/home/u
+rl/data/2026-11-26_trn2/scrub_allow.txt	other-home-folder	the session folder's own scrub record quotes the accepted text	/home/ubu
+rl/data/2026-11-26_trn2/scrub_allow.txt	other-home-folder	the session folder's own scrub record quotes the accepted text	/home/.openmpi
+rl/data/2026-11-26_trn2/scrub_report.txt	other-home-folder	the session folder's own scrub record quotes the accepted text	/home/u
+rl/data/2026-11-26_trn2/scrub_report.txt	other-home-folder	the session folder's own scrub record quotes the accepted text	/home/ubu
+rl/data/2026-11-26_trn2/scrub_report.txt	other-home-folder	the session folder's own scrub record quotes the accepted text	/home/.openmpi
+rl/data/2026-11-26_trn2/scrub_check.py	arn	the imported 2026-11-26 scrubber is scanned too; its docstring and pattern table must spell out what each pattern looks for	arn:aws
+rl/data/2026-11-26_trn2/scrub_check.py	user-at-host	the imported 2026-11-26 scrubber is scanned too; its docstring and pattern table must spell out what each pattern looks for	user@
+rl/data/2026-11-26_trn2/scrub_check.py	key-file	the imported 2026-11-26 scrubber is scanned too; its docstring and pattern table must spell out what each pattern looks for	.pem
+rl/data/2026-11-26_trn2/scrub_check.py	key-file	the imported 2026-11-26 scrubber is scanned too; its docstring and pattern table must spell out what each pattern looks for	.ppk
+rl/data/2026-11-26_trn2/scrub_check.py	key-file	the imported 2026-11-26 scrubber is scanned too; its docstring and pattern table must spell out what each pattern looks for	id_rsa
+rl/data/2026-11-26_trn2/scrub_check.py	price	the imported 2026-11-26 scrubber is scanned too; its docstring and pattern table must spell out what each pattern looks for	USD
+rl/data/2026-11-26_trn2/scrub_check.py	price	the imported 2026-11-26 scrubber is scanned too; its docstring and pattern table must spell out what each pattern looks for	on-demand
+rl/data/2026-11-26_trn2/scrub_check.py	price	the imported 2026-11-26 scrubber is scanned too; its docstring and pattern table must spell out what each pattern looks for	spot price
+rl/selftest_cache_record.py	windows-path	container mount specs in test strings, not a drive letter	p:/
+rl/selftest_cache_record.py	windows-path	container mount specs in test strings, not a drive letter	a:/
+rl/selftest_launcher_env.py	windows-path	a comment that names the Git Bash path form of a drive on purpose; no local path of ours	C:/
