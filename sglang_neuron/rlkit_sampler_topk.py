@@ -68,9 +68,11 @@ def sample_filtered_sharded_logits_kernel(logits, group, rank, vocabulary_size, 
     rows, width = logits.shape
     rank64 = rank.to(torch.int64)
     logits = logits.float()
-    if width * group.world_size > vocabulary_size:                   # padded columns exist: the engine's mask
-        ids = torch.arange(width, dtype=torch.int64, device=logits.device) + rank64 * width
-        logits = logits.masked_fill(ids.unsqueeze(0) >= vocabulary_size, float("-inf"))
+    # the engine's mask, always applied as sampling._tempered_scores does, also when no column is padded (then it
+    # masks nothing). Skipping it when width * world_size == vocabulary_size gave other temperature-0 logprobs than the
+    # released path on Qwen3-0.6B at TP4 (docs/rl/RESULTS.md section 10).
+    ids = torch.arange(width, dtype=torch.int64, device=logits.device) + rank64 * width
+    logits = logits.masked_fill(ids.unsqueeze(0) >= vocabulary_size, float("-inf"))
     # per-row columns, as sampling._tempered_scores (v0.1.0 lines 316-319)
     temperature = temperatures.reshape(rows, 1).to(torch.float32)
     sampled = temperature > 0

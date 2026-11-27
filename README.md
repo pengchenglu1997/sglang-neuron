@@ -38,7 +38,7 @@ Open work branches today:
 | `feat/lm-head-pretransposed` | opt-in pre-transposed LM head weight, on upstream v0.1.0 | merged into `integration`; superseded by the two branches below |
 | `feat/lm-head-pretransposed-integration` | the same change on `integration`, where the in-place weight reload also writes the LM head's own copy of a tied model | merged into `integration`; the in-place reload with the switch on has not run on a device |
 | `feat/lm-head-pretransposed-main` | the same change on `main` (no in-place reload there) | ran on trn2 as this tree, 2026-11-26 (numbers below); pull request to `main` |
-| `feat/sampler-kernel-topk-topp` | the sampler kernel in the `topk_topp` mode, switch `RLKIT_SAMPLER_KERNEL_TOPK=1`, off by default ([tests/rlkit_sampler/README.md](tests/rlkit_sampler/README.md)) | merged into `integration`; first hardware run at Qwen3-0.6B on 2026-11-26; with the switch on, logprobs at temperature 0 differ from the switch off (applying the vocabulary mask on the kernel path removed the difference in that run; that change is not merged yet) |
+| `feat/sampler-kernel-topk-topp` | the sampler kernel in the `topk_topp` mode, switch `RLKIT_SAMPLER_KERNEL_TOPK=1`, off by default ([tests/rlkit_sampler/README.md](tests/rlkit_sampler/README.md)) | merged into `integration`; first hardware run at Qwen3-0.6B on 2026-11-26: with the switch on, logprobs at temperature 0 differed from the switch off, and applying the vocabulary mask on the kernel path removed the difference on 20 of 20 prompts (pull request `fix/topk-kernel-vocab-mask`, [RESULTS.md](docs/rl/RESULTS.md) section 10) |
 
 To read or run an upstream pull request that is not in `integration`, fetch its head from upstream:
 
