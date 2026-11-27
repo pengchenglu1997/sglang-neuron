@@ -1,0 +1,16 @@
+{
+  "_note": "Recorded with gh on 2026-11-27: base, labels and changed paths of merged fork pull requests. old_rule: what the retired label check said (exactly one evidence label). expect: the F1 verdict.",
+  "3": {"title": "ci: require a verification label on pull requests", "base": "main", "labels": ["cpu-only"],
+        "paths": [".github/workflows/team-pr-label-check.yml"], "old_rule": "pass", "expect": "pass"},
+  "13": {"title": "Pre-transposed LM head on main", "base": "main", "labels": ["hardware-verified"],
+         "paths": ["README.md", "docs/guides/reference-configuration.md", "docs/model-dev/onboarding-models.md", "docs/rl/KERNELS.md",
+                   "docs/rl/RESULTS.md", "sglang_neuron/env_registry.py", "sglang_neuron/models/transformer/config.py",
+                   "sglang_neuron/models/transformer/model.py", "sglang_neuron/models/transformer/weights.py", "tests/__init__.py",
+                   "tests/cpu/__init__.py", "tests/cpu/test_lm_head_pretransposed.py"],
+         "old_rule": "pass", "expect": "pass"},
+  "15": {"title": "topk kernel: apply the vocabulary mask on every call", "base": "integration", "labels": ["hardware-verified"],
+         "paths": ["README.md", "docs/rl/KERNELS.md", "docs/rl/RESULTS.md", "sglang_neuron/rlkit_sampler_topk.py",
+                   "tests/rlkit_sampler/README.md", "tests/rlkit_sampler/selftest_sampler_topk.py"],
+         "old_rule": "pass", "expect": "fail",
+         "why": "it changed README.md on integration; since round 3 a hardware-verified pull request into integration may differ from main only under rl/data/<session>/ and docs/rl/, so README.md would have to equal main (replay does not compare with main)"}
+}
