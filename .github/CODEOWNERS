@@ -19,5 +19,7 @@
 # fixtures, scrub_allow.txt, the other checks) decide what the rest of the checks accept. Without this line one teammate
 # approval could change a rule that judges the same pull request.
 /rl/tools/            @pengchenglu1997
+# The Claude Code project settings and hook (.claude/, a TEAM path) are tier 3: they decide which commands ask the human.
+/.claude/             @pengchenglu1997
 #
 # Tier 1 (regenerated README blocks only) is not a path rule and has no line here.

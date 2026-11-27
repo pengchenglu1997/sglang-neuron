@@ -116,7 +116,7 @@ done
 
 echo "== engine paths main has that integration lacks"
 if [ "$have_integ" = 1 ]; then
-  eng="$(git -c core.quotepath=false diff --name-only "$INTEG...$MAIN" -- . ':!rl' ':!docs/rl' ':!README.md' ':!AGENTS.md' ':!CLAUDE.md' ':!.github' ':!.gitattributes')" || { echo "fork_state: git diff failed" >&2; exit 2; }
+  eng="$(git -c core.quotepath=false diff --name-only "$INTEG...$MAIN" -- . ':!rl' ':!docs/rl' ':!README.md' ':!AGENTS.md' ':!CLAUDE.md' ':!.github' ':!.claude' ':!.gitattributes')" || { echo "fork_state: git diff failed" >&2; exit 2; }
   if [ -n "$eng" ]; then printf '%s\n' "$eng"; echo "(merge main into integration, label cpu-only)"; else echo "none"; fi
 else
   echo "not read: no $REMOTE/integration"; incomplete=1

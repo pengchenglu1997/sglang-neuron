@@ -37,7 +37,7 @@ python make_patch_dir.py --ref 9857f66 --out $DATA_ROOT/patch_9857f66
 (cd $DATA_ROOT/patch_9857f66 && sha256sum -c $REPO/rl/data/2026-11-26_trn2/lm_head/patch_sha256.txt)   # an OK line per file
 
 # 2. image, models, GSM8K, llmbench at its pinned commit (not rerun)
-LLMBENCH_URL=<the llmbench repository named in the header of 22b_llmbench_grid.sh> bash s4_prep.sh
+bash s4_prep.sh   # clones LLMBENCH_URL (default https://github.com/HolboxAI/llmbench) and checks out the pinned commit
 
 # 3. cold compile of Qwen3-0.6B, then two temperature-0 passes and one temperature-0.8 pass (not rerun)
 bash s4_x.sh bench lmh_q06_s1k 06 temperature 48-51 30550 $DATA_ROOT/patch_9857f66 \
