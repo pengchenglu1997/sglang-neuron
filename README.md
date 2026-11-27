@@ -35,8 +35,9 @@ Open work branches today:
 | `feat/sampler-kernel` | the sampler kernel below, on upstream `main` | merged into `main`; kept because upstream draft pull request [#25](https://github.com/sgl-project/sglang-neuron/pull/25) uses it |
 | `feat/inplace-adapter-sync` | in-place weight update and LoRA adapter sync | ran on trn2 (Qwen3-0.6B and Qwen3-8B). Not in `main` or `integration`: it and upstream pull request 20 change the same function |
 | `feat/lora-merge-kernel` | LoRA shard-merge NKI kernel, on top of `feat/inplace-adapter-sync`, off by default | first hardware run at Qwen3-0.6B on 2026-11-24; acceptance rule open |
-| `feat/lm-head-pretransposed` | opt-in pre-transposed LM head weight, on upstream v0.1.0 | CPU only; its draft pull request conflicts with `integration` and is superseded by the branch below |
-| `feat/lm-head-pretransposed-integration` | the same change on `integration`, where the in-place weight reload also writes the LM head's own copy of a tied model | CPU only; pull request to `integration` |
+| `feat/lm-head-pretransposed` | opt-in pre-transposed LM head weight, on upstream v0.1.0 | merged into `integration`; superseded by the two branches below |
+| `feat/lm-head-pretransposed-integration` | the same change on `integration`, where the in-place weight reload also writes the LM head's own copy of a tied model | merged into `integration`; the in-place reload with the switch on has not run on a device |
+| `feat/lm-head-pretransposed-main` | the same change on `main` (no in-place reload there) | ran on trn2 as this tree, 2026-11-26 (numbers below); pull request to `main` |
 
 To read or run an upstream pull request that is not in `integration`, fetch its head from upstream:
 
@@ -50,8 +51,10 @@ git fetch https://github.com/sgl-project/sglang-neuron pull/<N>/head:upstream-pr
 |---|---|---|
 | Compile cache: the stamp's temporary file gets a name of its own, so two servers that start together on one empty cache do not stop at start-up (`sglang_neuron/backend/compile_cache.py`) | none, always on | trn2, 2026-11-24, 10 trials per arm: released code 1 of 10 failed, with the fix 0 of 10 |
 | Sampler NKI kernel for the `temperature` sampler (`sglang_neuron/rlkit_sampler_kernel.py`, one guarded branch in `sglang_neuron/sampling.py`, tests in `tests/rlkit_sampler/`) | `RLKIT_SAMPLER_KERNEL=1`; unset, the released code path runs | trn2, 2026-11-24, Qwen3-0.6B and Qwen3-8B (numbers below). Not run inside a full RL loop |
+| Pre-transposed LM head weight: the dense transformer's LM head holds its shard as `[hidden, vocab / tp]`, the layout its matmul reads; a tied model gets its own copy, filled from the embedding's checkpoint tensor (`sglang_neuron/models/transformer/`, `sglang_neuron/env_registry.py`, tests in `tests/cpu/`) | `SGLANG_NEURON_LM_HEAD_PRETRANSPOSED=1`; unset or `0`, the released layout | trn2, 2026-11-26, as this tree with the other two, Qwen3-0.6B and Qwen3-8B (numbers below). `main` has no in-place weight reload, so no weight update with the switch on has run |
 
-Each of the two was run on its own branch. `main` with both together has not been started on hardware.
+The first two were run on their own branches on 2026-11-24. On 2026-11-26 the tree with all three (the LM head switch
+off and on, the sampler kernel on) ran on trn2 ([docs/rl/RESULTS.md](docs/rl/RESULTS.md) section 9).
 
 ## Measured
 
@@ -65,6 +68,9 @@ unless the row says otherwise. Every row, with its conditions and source file, i
 | Sampler kernel, Qwen3-0.6B, same prompt and concurrency, two passes | 2,730 and 2,734 tok/s, against 2,455 and 2,454 for the released `temperature` sampler |
 | Sampler kernel, Qwen3-8B, two passes | 1,489 and 1,496 tok/s, against 1,421 and 1,426 (about 5 percent) |
 | Sampler kernel with `--dp-size 4` of TP1 in one server, Qwen3-0.6B | 3,026 tok/s; the released sampler with `--dp-size 4`: 2,701 (one measurement) |
+| Pre-transposed LM head, this tree with the sampler kernel, Qwen3-0.6B, prompt 1024, concurrency 32, two passes (2026-11-26) | switch on: 3,337 and 3,327 tok/s, against 2,739 and 2,739 with it off; 20 of 20 prompts give the same tokens at temperature 0, GSM8K first 200 the same (0.565) |
+| Pre-transposed LM head without the sampler kernel, Qwen3-0.6B, same prompt and concurrency (2026-11-26) | switch on: 2,973 and 2,971 tok/s (a second start: 2,969 and 2,974), against 2,453 and 2,447 with it off |
+| Pre-transposed LM head with the sampler kernel, Qwen3-8B (2026-11-26) | switch on: 1,498 and 1,504 tok/s, against 1,501 and 1,500 with it off: no change |
 | New weights on Qwen3-0.6B: restart, against an in-place update (`feat/inplace-adapter-sync`) | 455-460 s, against 0.34-0.41 s |
 | Upstream pull request 20 on its own branch: in-place update against a fresh start on the same checkpoint | same text, largest token logprob difference 0.0, 20 prompts, Qwen3-0.6B and Qwen3-8B |
 

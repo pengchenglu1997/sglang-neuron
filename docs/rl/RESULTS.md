@@ -1,7 +1,8 @@
 # Results so far
 
-Measured results of the RL post-training work on Trainium2 with SGLang-Neuron, as of 2026-11-25. Section 8 (the trn2
+Measured results of the RL post-training work on Trainium2 with SGLang-Neuron, as of 2026-11-26. Section 8 (the trn2
 session of 2026-11-24) was added on 2026-11-25. Sentences that were out of date after that session were changed and say so.
+Section 9 (the pre-transposed LM head on `main`, trn2 session of 2026-11-26) was added on 2026-11-26.
 
 Rules for reading this file:
 
@@ -427,6 +428,109 @@ cell: prompt 1024, concurrency 8, 256 output tokens, 32 requests: 153 tok/s, TTF
 Captured, not analysed. Four decode steps of TP rank 0, three servers: released `temperature` sampler, sampler kernel,
 sampler kernel with `--dp-size 4` (four replicas). They were converted to parquet on the machine. Nothing in this file is
 derived from them. The existing script `59d_devprof_sum.py` does not read this layout (there is no `summary.json`).
+
+## 9. trn2 session of 2026-11-26: pre-transposed LM head on `main`
+
+What ran: the tree of branch `feat/lm-head-pretransposed-main`, which is `main` (commit `1c8b314`) plus the opt-in
+pre-transposed LM head (`SGLANG_NEURON_LM_HEAD_PRETRANSPOSED`, default off; code of commit `9857f66`, later commits of
+the branch change documents only). The seven files under `sglang_neuron/` in which the branch differs from
+`upstream-main` (`backend/compile_cache.py`, `env_registry.py`, `models/transformer/config.py`, `model.py`,
+`weights.py`, `rlkit_sampler_kernel.py`, `sampling.py`) were mounted over the installed package of the v0.1.0 image, so
+the server ran this tree. `main` has no in-place weight reload; none was run.
+
+Conditions for every row of this section:
+
+- trn2.48xlarge (Trainium2), image `pytorch-inference-sglang-neuron:v0.1.0-neuron-py314-sdk-2.33.0-ubuntu26.04`, one
+  chip as TP4 (4 logical cores), sampler `temperature`.
+- Launch: the image's example script of the model (`qwen3_0p6b/run_server.sh`, `qwen3_8b/run_server.sh`) with
+  `--context-length 4096 --chunked-prefill-size 2048 --max-running-requests 32 --max-total-tokens 131072
+  --cuda-graph-bs-decode 1 8 32` appended.
+- Switches: "switch 0" is `SGLANG_NEURON_LM_HEAD_PRETRANSPOSED=0`, "switch 1" is `=1`. "Kernel" is
+  `RLKIT_SAMPLER_KERNEL=1` (section 8.5). Switch 0 with the kernel is `main` as it is used today.
+- llmbench at commit 08f4163: prompt 1024 tokens, 256 output tokens (`ignore_eos`), temperature 0, streaming
+  `/v1/completions`, 64 requests per cell after 4 warm-up requests, concurrency 1, 8 and 32. Cell: tok/s
+  (`output_token_throughput_tps`) / TTFT p50. Two passes on one server start, one after the other. The servers of a
+  comparison ran one after the other on the same chip, from a warm compile cache of their own.
+- One session. Other jobs (compiles and benchmarks of other work) ran on the other chips of the same machine during
+  every row; the container list before and after each benchmark is in the result logs. No row was repeated on a quiet
+  machine.
+- Every request of every cell succeeded (0 errors).
+- The result files of this section (llmbench summaries, start-up events, the answers of the correctness check, server
+  logs) are not in the public data repository yet.
+
+Qwen3-0.6B:
+
+| Server | Pass | Concurrency 1 | Concurrency 8 | Concurrency 32 |
+|---|---|---|---|---|
+| switch 0, kernel | 1 | 319.5 / 0.027 s | 1,613.9 / 0.078 s | 2,738.6 / 0.257 s |
+| switch 0, kernel | 2 | 317.7 / 0.028 s | 1,636.6 / 0.077 s | 2,738.5 / 0.261 s |
+| switch 1, kernel | 1 | 325.8 / 0.027 s | 1,639.9 / 0.078 s | 3,337.3 / 0.260 s |
+| switch 1, kernel | 2 | 326.3 / 0.028 s | 1,654.6 / 0.074 s | 3,326.7 / 0.261 s |
+| switch 1, no kernel (first start) | 1 | 329.7 / 0.025 s | 1,629.0 / 0.074 s | 2,972.7 / 0.254 s |
+| switch 1, no kernel (first start) | 2 | 328.6 / 0.026 s | 1,640.2 / 0.074 s | 2,971.1 / 0.257 s |
+| switch 0, no kernel | 1 | 205.7 / 0.031 s | 1,155.1 / 0.081 s | 2,452.9 / 0.269 s |
+| switch 0, no kernel | 2 | 210.5 / 0.029 s | 1,166.7 / 0.078 s | 2,446.6 / 0.265 s |
+| switch 1, no kernel (second start) | 1 | 325.1 / 0.027 s | 1,612.3 / 0.080 s | 2,969.0 / 0.261 s |
+| switch 1, no kernel (second start) | 2 | 324.3 / 0.029 s | 1,639.4 / 0.075 s | 2,974.0 / 0.255 s |
+
+The rows ran in this order: the two kernel servers, the first start of switch 1 without the kernel, the two Qwen3-8B
+servers, then switch 0 without the kernel and a second start of switch 1 without the kernel (from a copy of its cache),
+back to back. Switch 0 without the kernel is the released code path apart from the compile-cache fix.
+
+Qwen3-8B:
+
+| Server | Pass | Concurrency 1 | Concurrency 8 | Concurrency 32 |
+|---|---|---|---|---|
+| switch 0, kernel | 1 | 114.2 / 0.068 s | 644.9 / 0.213 s | 1,501.1 / 0.720 s |
+| switch 0, kernel | 2 | 114.7 / 0.057 s | 646.5 / 0.212 s | 1,500.2 / 0.723 s |
+| switch 1, kernel | 1 | 115.1 / 0.067 s | 638.5 / 0.207 s | 1,497.5 / 0.738 s |
+| switch 1, kernel | 2 | 115.6 / 0.055 s | 640.6 / 0.207 s | 1,504.1 / 0.719 s |
+
+Reading, by division of the table values:
+
+- Qwen3-0.6B with the kernel: switch 1 is 2 to 3 percent above switch 0 at concurrency 1 (325.8 and 326.3 against
+  319.5 and 317.7) and at most 2.5 percent at concurrency 8 (1,654.6 against 1,613.9; pass 2 alone: 1.1 percent), within
+  the spread of the two passes there. At concurrency 32 it is 21.9 and 21.5 percent above (3,337.3 and 3,326.7 against
+  2,738.6 and 2,738.5). TTFT p50 does not move by more than 0.004 s.
+- Qwen3-0.6B without the kernel: switch 1 is 54 to 60 percent above switch 0 at concurrency 1, 38 to 42 percent at
+  concurrency 8 and 21 percent at concurrency 32 (both starts of switch 1). So at concurrency 1 and 8 the switch and the
+  kernel give about the same speed, alone or together; at concurrency 32 the two add. Why they overlap at low
+  concurrency was not examined.
+- Qwen3-8B with the kernel: no change (concurrency 32: 1,497.5 and 1,504.1 against 1,501.1 and 1,500.2; pass against
+  pass, every cell within 1 percent). Qwen3-8B does not tie its embeddings.
+
+Correctness, switch 0 against switch 1, both with the kernel (method of section 8.5: 20 fixed prompts, 48 new tokens,
+temperature 0, one request at a time; a fork is the first position where the tokens differ, logprob differences are
+taken before a fork):
+
+| Check | Qwen3-0.6B | Qwen3-8B |
+|---|---|---|
+| prompts with the same tokens | 20 of 20 (same text 20 of 20) | 20 of 20 (same text 20 of 20) |
+| token logprobs compared / bit-equal | 860 / 826 | 932 / 876 |
+| largest logprob difference | 0.0252 | 0.0320 |
+| GSM8K test, first 200 questions, temperature 0, up to 512 tokens | 0.565 with either switch; the same 113 questions right, McNemar p 1.0 | not run |
+
+The log line "sampler by the kernel" is in the log of every rank of each server run with the kernel and absent from the
+server without it.
+
+Start-up, seconds to ready (cold: empty compile cache, four servers compiling at once on four chips; warm: the
+benchmark start from the server's own cache):
+
+| Server | Cold | Warm |
+|---|---|---|
+| Qwen3-0.6B switch 0, kernel | 561.6 | 284.9 |
+| Qwen3-0.6B switch 1, kernel | 556.6 | 279.8 |
+| Qwen3-0.6B switch 1, no kernel | 581.7 (compiled later, with two other servers of this section starting) | 279.8 |
+| Qwen3-0.6B switch 0, no kernel | 606.4 (compiled with two other servers of this section running) | 254.6 |
+| Qwen3-0.6B switch 1, no kernel, second start | (cache copy) | 264.8 |
+| Qwen3-8B switch 0, kernel | 833.1 | 335.0 |
+| Qwen3-8B switch 1, kernel | 828.1 | 340.1 |
+
+Limits: one session on a shared machine; two passes on one start per server, no second start; temperature 0 only in the
+speed rows; `main` has no in-place weight reload, so a weight update with the switch on was not run; whether the
+decode graph drops the per-step transpose was not read from a device profile (profiles were captured, not analysed);
+not run inside an RL loop. The switch adds one vocabulary shard per rank on a tied model (Qwen3-0.6B); Qwen3-8B is
+untied, its LM head only changes layout.
 
 ## Not measured yet
 
