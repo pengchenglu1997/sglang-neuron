@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Pull request checks F1 (label from base and paths) and F2 (hardware evidence).
 
-    check_pr.py f1 --base BASE --labels a,b --paths-file FILE|-
-    check_pr.py f2 --labels a,b --paths-file FILE|- --body-file FILE --head REV [--main REV] [--repo DIR]
-    check_pr.py classify --kind team|engine < paths      (prints the paths of that kind, one per line)
+    check_pr.py f1 --base BASE (--labels a,b | --labels-json '["a","b"]') --paths-file FILE|-
+    check_pr.py f2 (--labels a,b | --labels-json JSON) --paths-file FILE|- --body-file FILE --head REV [--main REV] [--repo DIR]
+    check_pr.py classify --kind team|engine [-z] < paths  (prints the paths of that kind, one per line or NUL-separated)
     check_pr.py replay --pr N [--repo OWNER/NAME]        (F1 on a real pull request, read with gh)
 
 F1 (fails the job):
@@ -135,9 +135,9 @@ def replay(pr, repo):
     files = gh_json(["api", "--paginate", "repos/%s/pulls/%s/files" % (repo, pr)])
     paths = []
     for f in files:
-        paths.append(common.norm(f["filename"]))
+        paths.append(f["filename"])
         if f.get("previous_filename"):
-            paths.append(common.norm(f["previous_filename"]))
+            paths.append(f["previous_filename"])
     labels = [l["name"] for l in info["labels"]]
     return info["baseRefName"], labels, paths, info
 
@@ -151,7 +151,17 @@ def read_paths_arg(arg):
     return common.split_paths(raw)
 
 
-def labels_arg(s):
+def labels_arg(s, as_json=None):
+    """Label names. CI passes --labels-json (a JSON list of names): a name that holds a comma stays one name.
+    --labels (comma-separated) is for typing by hand."""
+    if as_json is not None:
+        try:
+            names = json.loads(as_json or "[]")
+        except ValueError as e:
+            raise RuntimeError("--labels-json is not JSON: %s" % e)
+        if not isinstance(names, list) or not all(isinstance(x, str) for x in names):
+            raise RuntimeError("--labels-json must be a JSON list of strings")
+        return names
     return [x.strip() for x in (s or "").replace("\n", ",").split(",") if x.strip()]
 
 
@@ -161,9 +171,11 @@ def main(argv=None):
     p1 = sub.add_parser("f1")
     p1.add_argument("--base", required=True)
     p1.add_argument("--labels", default="")
+    p1.add_argument("--labels-json")
     p1.add_argument("--paths-file", required=True)
     p2 = sub.add_parser("f2")
     p2.add_argument("--labels", default="")
+    p2.add_argument("--labels-json")
     p2.add_argument("--paths-file", required=True)
     p2.add_argument("--body-file", required=True)
     p2.add_argument("--head", required=True)
@@ -171,21 +183,24 @@ def main(argv=None):
     p2.add_argument("--repo", default=".")
     p3 = sub.add_parser("classify")
     p3.add_argument("--kind", choices=["team", "engine"], required=True)
+    p3.add_argument("-z", action="store_true", help="print NUL-separated (a name that holds a newline stays whole)")
     p4 = sub.add_parser("replay")
     p4.add_argument("--pr", type=int, required=True)
     p4.add_argument("--repo", default="pengchenglu1997/sglang-neuron")
     a = ap.parse_args(argv)
     try:
         if a.cmd == "f1":
-            ok, msgs = f1(a.base, labels_arg(a.labels), read_paths_arg(a.paths_file))
+            ok, msgs = f1(a.base, labels_arg(a.labels, a.labels_json), read_paths_arg(a.paths_file))
         elif a.cmd == "f2":
             body = open(a.body_file, encoding="utf-8", errors="replace").read()
-            ok, msgs = f2(labels_arg(a.labels), read_paths_arg(a.paths_file), body, a.head, a.main, a.repo)
+            ok, msgs = f2(labels_arg(a.labels, a.labels_json), read_paths_arg(a.paths_file), body, a.head, a.main, a.repo)
         elif a.cmd == "classify":
             want_team = a.kind == "team"
+            out = sys.stdout.buffer
             for p in common.split_paths(sys.stdin.buffer.read()):
                 if common.is_team(p) == want_team:
-                    print(p)
+                    out.write(os.fsencode(p) + (b"\0" if a.z else b"\n"))
+            out.flush()
             return 0
         else:
             base, labels, paths, info = replay(a.pr, a.repo)

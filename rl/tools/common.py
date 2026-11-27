@@ -15,7 +15,9 @@ FROZEN_PREFIXES = ("rl/data/", "rl/patches/", "rl/docs/")
 EVIDENCE_LABELS = ("cpu-only", "hardware-verified")
 
 
-def norm(path):
+def norm_user(path):
+    """Tidy a path that a person typed (a command line, a pasted list). Never use it on a name that git reports:
+    a name with a backslash, a leading or a trailing space is a different file from the one without."""
     p = path.strip().replace("\\", "/")
     while p.startswith("./"):
         p = p[2:]
@@ -23,20 +25,21 @@ def norm(path):
 
 
 def is_team(path):
-    p = norm(path)
-    return p in TEAM_FILES or p.startswith(TEAM_PREFIXES)
+    return path in TEAM_FILES or path.startswith(TEAM_PREFIXES)
 
 
 def is_frozen(path):
-    return norm(path).startswith(FROZEN_PREFIXES)
+    return path.startswith(FROZEN_PREFIXES)
 
 
 def split_paths(raw):
-    """Parse a path list: NUL-separated when it holds a NUL byte, otherwise one path per line."""
+    """Parse a path list exactly as given: NUL-separated when it holds a NUL byte (git diff -z, classify -z),
+    otherwise one path per line. Nothing is stripped; empty entries are dropped. A name that holds a newline
+    can only be listed with NUL separators."""
     if isinstance(raw, bytes):
-        raw = raw.decode("utf-8", "replace")
+        raw = raw.decode("utf-8", "surrogateescape")
     parts = raw.split("\0") if "\0" in raw else raw.split("\n")
-    return [norm(p) for p in parts if p.strip()]
+    return [p for p in parts if p != ""]
 
 
 def git(args, cwd=".", binary=False, check=True):
@@ -78,7 +81,7 @@ def changed(base, head, cwd="."):
     """[(status, path)] between base...head, renames split into a delete and an add."""
     out = git(["diff", "--name-status", "-z", "--no-renames", "%s...%s" % (base, head)], cwd=cwd)
     toks = [t for t in out.split("\0") if t != ""]
-    return [(toks[i], norm(toks[i + 1])) for i in range(0, len(toks) - 1, 2)]
+    return [(toks[i], toks[i + 1]) for i in range(0, len(toks) - 1, 2)]
 
 
 def is_text(data):

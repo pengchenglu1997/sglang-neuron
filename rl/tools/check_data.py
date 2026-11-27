@@ -6,10 +6,13 @@
 All bytes are read from git objects (git show), never from the working tree.
   - a new folder rl/data/<session>/ has README.md and SHA256SUMS (every line verified, every other file listed);
     PATCH_MANIFEST.txt is required for sglang-neuron runs, which a script cannot tell: its absence is printed as a note;
+  - files added to a session folder that already exists at the base must be listed, with their sha256, in a sums file
+    that the same pull request adds to that folder, named SHA256SUMS.<tag> (the folder's own SHA256SUMS is never
+    changed: it would fail as modified); the sums file is verified like SHA256SUMS;
   - a file that exists at the base under rl/data/ or rl/patches/ is never modified or deleted;
   - when rl/data/LEGACY.sha256 exists at the head, every file it lists matches (paths relative to the
     repository root or to rl/data/);
-  - a file is at most 2 MB and a session folder at most 10 MB.
+  - a file is at most 2 MB, and a session folder that is new or gets added files is at most 10 MB in total at the head.
 Exit status: 0 pass, 1 fail, 2 bad input.
 """
 import argparse
@@ -26,6 +29,7 @@ import common  # noqa: E402
 MAX_FILE = 2 * 1024 * 1024
 MAX_FOLDER = 10 * 1024 * 1024
 LINE = re.compile(r"^([0-9a-fA-F]{64})\s+\*?(\S.*?)\s*$")
+EXTRA_SUMS = re.compile(r"^SHA256SUMS\.[A-Za-z0-9_.-]+$")
 
 
 def parse_sums(data):
@@ -64,26 +68,50 @@ def check(base, head, repo="."):
     for p, size in head_files:
         if p in added and size > MAX_FILE:
             bad("F6: %s is %d bytes, over the 2 MB file cap." % (p, size))
+    def verify(pre, sums_name):
+        """Check every line of one sums file of a folder; the set of files it lists."""
+        listed = set()
+        for digest, rel in parse_sums(common.show(head, pre + sums_name, cwd=repo) or b""):
+            listed.add(rel)
+            data = common.show(head, pre + rel, cwd=repo)
+            if data is None:
+                bad("F6: %s%s lists %s, which does not exist." % (pre, sums_name, rel))
+            elif sha(data) != digest:
+                bad("F6: %s%s does not match its %s line." % (pre, rel, sums_name))
+        return listed
+
+    def folder_cap(pre):
+        total = sum(n for p, n in head_files if p.startswith(pre))
+        if total > MAX_FOLDER:
+            bad("F6: %s is %d bytes, over the 10 MB folder cap." % (pre, total))
+
+    touched = sorted({p.split("/")[2] for p in added if p.count("/") >= 3 and p.split("/")[2] in base_sessions})
+    for s in touched:
+        pre = "rl/data/%s/" % s
+        folder_cap(pre)
+        new_files = sorted(p[len(pre):] for p in added if p.startswith(pre))
+        sums = [r for r in new_files if EXTRA_SUMS.match(r)]
+        if not sums:
+            bad("F6: %s already exists at the base; the added file(s) %s need a new sums file %sSHA256SUMS.<tag> that lists them."
+                % (pre, ", ".join(new_files), pre))
+            continue
+        listed = set()
+        for r in sums:
+            listed |= verify(pre, r)
+        for rel in new_files:
+            if rel not in listed and rel not in sums:
+                bad("F6: %s%s is added to an existing folder and is not listed in %s." % (pre, rel, ", ".join(sums)))
     for s in new:
         pre = "rl/data/%s/" % s
         files = [(p, n) for p, n in head_files if p.startswith(pre)]
-        total = sum(n for _, n in files)
-        if total > MAX_FOLDER:
-            bad("F6: %s is %d bytes, over the 10 MB folder cap." % (pre, total))
+        folder_cap(pre)
         names = {p[len(pre):]: p for p, _ in files}
         if "README.md" not in names:
             bad("F6: new folder %s has no README.md." % pre)
         if "SHA256SUMS" not in names:
             bad("F6: new folder %s has no SHA256SUMS." % pre)
         else:
-            listed = set()
-            for digest, rel in parse_sums(common.show(head, names["SHA256SUMS"], cwd=repo) or b""):
-                listed.add(rel)
-                data = common.show(head, pre + rel, cwd=repo)
-                if data is None:
-                    bad("F6: %sSHA256SUMS lists %s, which does not exist." % (pre, rel))
-                elif sha(data) != digest:
-                    bad("F6: %s%s does not match its SHA256SUMS line." % (pre, rel))
+            listed = verify(pre, "SHA256SUMS")
             for rel in sorted(set(names) - listed - {"SHA256SUMS"}):
                 bad("F6: %s%s is not listed in SHA256SUMS." % (pre, rel))
         if not any(r.endswith("PATCH_MANIFEST.txt") for r in names):
@@ -104,7 +132,8 @@ def check(base, head, repo="."):
                 bad("F6: %s differs from LEGACY.sha256." % rel)
         notes.append("F6 note: %d LEGACY.sha256 lines checked." % n)
     if ok:
-        msgs.append("F6: %d new session folder(s), %d added data file(s)." % (len(new), len(added)))
+        msgs.append("F6: %d new session folder(s), %d existing folder(s) with added files, %d added data file(s)."
+                    % (len(new), len(touched), len(added)))
     return ok, msgs + notes
 
 

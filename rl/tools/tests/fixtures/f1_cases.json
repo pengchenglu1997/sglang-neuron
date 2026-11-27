@@ -17,5 +17,11 @@
   {"name": "pyproject.toml is engine", "base": "main", "labels": [], "paths": ["pyproject.toml"], "expect": "fail", "reason": "exactly one"},
   {"name": "no changed path, no label", "base": "main", "labels": [], "paths": [], "expect": "fail", "reason": "exactly one"},
   {"name": "other base keeps the old rule: no label", "base": "upstream-main", "labels": [], "paths": ["rl/README.md"], "expect": "fail", "reason": "exactly one"},
-  {"name": "other base keeps the old rule: one label", "base": "feat/x", "labels": ["cpu-only"], "paths": ["sglang_neuron/a.py"], "expect": "pass", "reason": "label is present"}
+  {"name": "other base keeps the old rule: one label", "base": "feat/x", "labels": ["cpu-only"], "paths": ["sglang_neuron/a.py"], "expect": "pass", "reason": "label is present"},
+  {"name": "root file named rl backslash evil.py is an engine path", "base": "main", "labels": [], "paths": ["rl\\evil.py"], "expect": "fail", "reason": "exactly one"},
+  {"name": "root file named docs backslash rl backslash x.md is an engine path", "base": "main", "labels": [], "paths": ["docs\\rl\\x.md"], "expect": "fail", "reason": "exactly one"},
+  {"name": "README.md with a trailing space is an engine path", "base": "main", "labels": [], "paths": ["README.md "], "expect": "fail", "reason": "exactly one"},
+  {"name": "README.md with a leading space is an engine path", "base": "main", "labels": [], "paths": [" README.md"], "expect": "fail", "reason": "exactly one"},
+  {"name": "a path with a space inside a team folder is still team", "base": "main", "labels": [], "paths": ["rl/data/a b/ c.md "], "expect": "pass", "reason": "team-only"},
+  {"name": "dot-slash is not rewritten: ./README.md is an engine path", "base": "main", "labels": [], "paths": ["./README.md"], "expect": "fail", "reason": "exactly one"}
 ]

@@ -1,5 +1,10 @@
-# Accepted hits of the public-content checks, repository-wide. One line per entry:
-#   <path><TAB><pattern name><TAB><reason>
-# The path is relative to the repository root. The pattern name is one of scrub_check.py's, or public-cpu-lint
-# (check_docs.py f4, accepts a whole file). An entry needs a reason; adding one is a tier-2 change.
-.github/workflows/team-checks.yml	user-at-host	uses: lines pin GitHub actions as name@tag, not a user at a host
+# Accepted hits of the public-content checks, repository-wide. One line per entry, tab-separated:
+#   <path><TAB><pattern name><TAB><reason>[<TAB><matched text>]
+# The path is relative to the repository root. The pattern name is one of scrub_check.py's, or public-cpu-lint.
+# scrub_check.py: with a matched text, only a hit equal to it is accepted; without it, every hit of that pattern in the
+#   file is (use that only for a file that is all one case).
+# public-cpu-lint (check_docs.py f4): the fourth field is required and is the line itself, with runs of white space
+#   collapsed to one space. An entry accepts that line only; the failure message prints the text to paste.
+# An entry needs a reason; adding one is a tier-2 change. The reason column is scanned like any other text.
+.github/workflows/team-checks.yml	user-at-host	uses: lines pin GitHub actions by tag, they do not name a user at a host	checkout@
+.github/workflows/team-checks.yml	user-at-host	uses: lines pin GitHub actions by tag, they do not name a user at a host	setup-python@

@@ -2,7 +2,9 @@ name: team-checks
 
 # Fork only. Replaces team-pr-label-check. The rules and their checks: rl/tools/ (check_pr.py, check_docs.py,
 # check_data.py, scrub_check.py, upstream_ready.sh) and their fixtures in rl/tools/tests/.
-#   F1  label derived from the base and the changed paths   required (fails the job)
+#   F1  label derived from the base and the changed paths   required (fails the job); runs the copy of
+#       check_pr.py and common.py that the BASE commit holds, so a pull request cannot loosen the rule it is judged by
+#       (the pull request's own copy is used only when the base has none, that is, when the tools are first added)
 #   F9  selftests of the tools                              required (fails the job)
 #   F2-F8, F10                                              report mode: printed as warnings, the job never fails
 # F5 (generated blocks) has no tool yet: best.py and switches.py arrive with rl/best.tsv.
@@ -34,10 +36,19 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -eu
-          labels=$(printf '%s' "$LABELS_JSON" | jq -r 'join(",")')
           git diff --name-only -z --no-renames "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/paths.z"
-          echo "base=$BASE_REF labels=[$labels] changed paths=$(tr -cd '\0' < "$RUNNER_TEMP/paths.z" | wc -c)"
-          python rl/tools/check_pr.py f1 --base "$BASE_REF" --labels "$labels" --paths-file "$RUNNER_TEMP/paths.z" \
+          f1dir="$RUNNER_TEMP/f1-from-base"
+          rm -rf "$f1dir"; mkdir -p "$f1dir"
+          if git cat-file -e "$BASE_SHA:rl/tools/check_pr.py" 2>/dev/null && git cat-file -e "$BASE_SHA:rl/tools/common.py" 2>/dev/null; then
+            git show "$BASE_SHA:rl/tools/check_pr.py" > "$f1dir/check_pr.py"
+            git show "$BASE_SHA:rl/tools/common.py" > "$f1dir/common.py"
+            echo "F1 runs the copy of check_pr.py and common.py at the base commit"
+          else
+            cp rl/tools/check_pr.py rl/tools/common.py "$f1dir/"
+            echo "the base has no rl/tools/check_pr.py yet: F1 runs the pull request's own copy"
+          fi
+          echo "base=$BASE_REF labels=$LABELS_JSON changed paths=$(tr -cd '\0' < "$RUNNER_TEMP/paths.z" | wc -c)"
+          python "$f1dir/check_pr.py" f1 --base "$BASE_REF" --labels-json "$LABELS_JSON" --paths-file "$RUNNER_TEMP/paths.z" \
             || { echo "::error::F1: label rule failed. See AGENTS.md rule 6 and rl/tools/check_pr.py."; exit 1; }
 
   f9-selftests:
@@ -87,22 +98,21 @@ jobs:
         run: |
           set -u
           T=rl/tools
-          labels=$(printf '%s' "$LABELS_JSON" | jq -r 'join(",")')
           git diff --name-only -z --no-renames "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/paths.z"
-          git diff --name-only -z --no-renames --diff-filter=d "$BASE_SHA...$HEAD_SHA" \
-            | python $T/check_pr.py classify --kind team > "$RUNNER_TEMP/team_files.txt"
+          git diff --name-only -z --no-renames --diff-filter=d "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/changed_alive.z"
+          python $T/check_pr.py classify --kind team -z < "$RUNNER_TEMP/changed_alive.z" > "$RUNNER_TEMP/team_files.z"
           printf '%s' "$PR_BODY" > "$RUNNER_TEMP/body.txt"
           step() { name="$1"; shift; echo "::group::$name"; if "$@"; then echo "$name: ok"; else echo "::warning::$name would fail (report mode)"; fi; echo "::endgroup::"; }
-          step "F2 hardware evidence" python $T/check_pr.py f2 --labels "$labels" --paths-file "$RUNNER_TEMP/paths.z" --body-file "$RUNNER_TEMP/body.txt" --head "$HEAD_SHA" --main origin/main
-          step "F3 scrub of changed team files" python $T/scrub_check.py --files-from "$RUNNER_TEMP/team_files.txt" --allow $T/scrub_allow.txt
-          step "F4 public CPU lint" python $T/check_docs.py f4
+          step "F2 hardware evidence" python $T/check_pr.py f2 --labels-json "$LABELS_JSON" --paths-file "$RUNNER_TEMP/paths.z" --body-file "$RUNNER_TEMP/body.txt" --head "$HEAD_SHA" --main origin/main
+          step "F3 scrub of changed team files" python $T/scrub_check.py --files-from-0 "$RUNNER_TEMP/team_files.z" --allow $T/scrub_allow.txt
+          step "F4 public CPU lint" python $T/check_docs.py f4 --base "$BASE_SHA"
           if [ -e $T/best.py ]; then
             step "F5 generated blocks" python $T/best.py --check README.md docs/rl/RESULTS.md
           else
             echo "F5 generated blocks: not checked, rl/tools/best.py and switches.py do not exist yet"
           fi
           step "F6 data folders" python $T/check_data.py --base "$BASE_SHA" --head "$HEAD_SHA"
-          step "F7 links and paths" python $T/check_docs.py f7
+          step "F7 links and paths" python $T/check_docs.py f7 --base "$BASE_SHA"
           step "F8 state wording on added lines" python $T/check_docs.py f8 --base "$BASE_SHA" --head "$HEAD_SHA"
           step "F10 engine files do not mention rl/" python $T/check_docs.py f10
           exit 0

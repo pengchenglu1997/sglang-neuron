@@ -4,7 +4,7 @@
     python scrub_check.py PATH [PATH ...] [--files-from LIST] [--words FILE] [--allow FILE] [--report OUT]
 
 Copied from the 2026-11-26 session folder (which keeps its as-run copy), with three changes for the team CI:
-a PATH may be a file or a folder, --files-from reads more paths (one per line), and file names in reports
+a PATH may be a file or a folder, --files-from / --files-from-0 read more paths, and file names in reports
 and in the allow list are relative to the current folder (run it from the repository root).
 
 Scans every file under each PATH (text and binary) for things that must not be published:
@@ -16,8 +16,11 @@ Scans every file under each PATH (text and binary) for things that must not be p
   and the project-internal words of a private word list (one word or phrase per line, matched without
   regard to case, kept outside the repository, because the list itself holds names).
 A file that is not valid UTF-8 is reported as a hit. The exit status is 1 when anything was found.
-This script and scrub_allow.txt hold the patterns as text and are not scanned.
---allow FILE: lines "path<TAB>pattern name<TAB>reason" for hits that are accepted on purpose (the report lists them).
+This script holds the patterns as text and is not scanned; scrub_allow.txt is scanned in its reason column only.
+A listed path that does not exist is an error (exit 2), never "nothing to scan". Lists are read without stripping;
+use --files-from-0 for a list that may hold a name with a newline.
+--allow FILE: lines "path<TAB>pattern name<TAB>reason[<TAB>matched text]" for hits that are accepted on purpose (the
+report lists them). With the matched text, only a hit that equals it is accepted; without it, the whole file is.
 """
 import argparse
 import os
@@ -53,19 +56,46 @@ def load_words(path):
 
 
 def load_allow(path):
+    """{(path, pattern name): [(matched text or None, reason)]}. A line is path<TAB>pattern<TAB>reason, optionally
+    followed by <TAB>matched text: with it, only a hit whose matched text is equal is accepted; without it, every
+    hit of that pattern in the file is."""
     allow = {}
     if path:
-        for line in open(path, encoding="utf-8"):
-            line = line.rstrip("\n")
-            if not line or line.startswith("#"):
-                continue
-            parts = line.split("\t")
-            if len(parts) == 3:
-                allow[(parts[0], parts[1])] = parts[2]
+        with open(path, encoding="utf-8", newline="") as fh:
+            for line in fh:
+                line = line.rstrip("\r\n")
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split("\t")
+                if len(parts) in (3, 4):
+                    allow.setdefault((parts[0], parts[1]), []).append((parts[3] if len(parts) == 4 else None, parts[2]))
     return allow
 
 
-SKIP = ("scrub_report.txt", "scrub_check.py", "scrub_allow.txt", "rl/tools/scrub_check.py", "rl/tools/scrub_allow.txt")
+def allow_reason(allow, rel, name, matched):
+    """The reason of the allow entry that accepts this hit, or None."""
+    for text, reason in allow.get((rel, name), ()):
+        if text is None or text == matched:
+            return reason
+    return None
+
+
+# These hold the patterns as text and are not scanned. The allow file is scanned apart: only its reason column.
+SKIP = ("scrub_report.txt", "scrub_check.py", "rl/tools/scrub_check.py")
+ALLOW_FILES = ("scrub_allow.txt", "rl/tools/scrub_allow.txt")
+
+
+def allow_reasons_only(text):
+    """The allow file with every column but the reasons blanked, so that line numbers stay."""
+    out = []
+    for line in text.split("\n"):
+        parts = line.split("\t")
+        out.append(parts[2] if len(parts) >= 3 and not line.startswith("#") else "")
+    return "\n".join(out)
+
+
+class MissingPath(Exception):
+    pass
 
 
 def iter_files(paths):
@@ -73,50 +103,74 @@ def iter_files(paths):
         if os.path.isfile(root):
             yield root
             continue
+        if not os.path.isdir(root):
+            raise MissingPath(root)   # a listed path that is not there is never "nothing to scan"
         for dp, dn, fn in os.walk(root):
             dn[:] = sorted(d for d in dn if d != ".git")
             for f in sorted(fn):
                 yield os.path.join(dp, f)
 
 
+def rel_name(p):
+    rel = os.path.relpath(p, ".")
+    return rel.replace("\\", "/") if os.sep == "\\" else rel
+
+
 def scan(paths, words, allow):
     hits, allowed, nfiles, nbytes = [], [], 0, 0
     wre = [(w, re.compile(re.escape(w), re.I)) for w in words]
     seen = set()
+
+    def record(rec, reason):
+        if reason is None:
+            hits.append(rec)
+        else:
+            allowed.append(rec + (reason,))
+
     for p in iter_files(paths):
-            rel = os.path.relpath(p, ".").replace("\\", "/")
-            if rel in seen:
-                continue
-            seen.add(rel)
-            if rel in SKIP:   # these hold the patterns / accepted hits as text
-                continue
-            raw = open(p, "rb").read()
-            nfiles += 1
-            nbytes += len(raw)
-            try:
-                text = raw.decode("utf-8")
-            except UnicodeDecodeError:
-                hits.append((rel, 0, "not-utf8", ""))
-                continue
-            if "\r" in text:
-                hits.append((rel, 0, "carriage-return", ""))
-            for ln, line in enumerate(text.split("\n"), 1):
-                for name, rx in PATTERNS:
-                    mo = rx.search(line)
-                    if mo:
-                        rec = (rel, ln, name, mo.group(0))
-                        (allowed if (rel, name) in allow else hits).append(rec)
-                for w, rx in wre:
-                    if rx.search(line):
-                        rec = (rel, ln, "private-word", "<word %d of the list>" % (words.index(w) + 1))
-                        (allowed if (rel, "private-word") in allow else hits).append(rec)
+        rel = rel_name(p)
+        if rel in seen:
+            continue
+        seen.add(rel)
+        if rel in SKIP:
+            continue
+        with open(p, "rb") as fh:
+            raw = fh.read()
+        nfiles += 1
+        nbytes += len(raw)
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            hits.append((rel, 0, "not-utf8", ""))
+            continue
+        if "\r" in text:
+            hits.append((rel, 0, "carriage-return", ""))
+        if rel in ALLOW_FILES:
+            text = allow_reasons_only(text)
+        for ln, line in enumerate(text.split("\n"), 1):
+            for name, rx in PATTERNS:
+                for mo in rx.finditer(line):
+                    record((rel, ln, name, mo.group(0)), allow_reason(allow, rel, name, mo.group(0)))
+            for w, rx in wre:
+                if rx.search(line):
+                    rec = (rel, ln, "private-word", "<word %d of the list>" % (words.index(w) + 1))
+                    record(rec, allow_reason(allow, rel, "private-word", rec[3]))
     return hits, allowed, nfiles, nbytes
+
+
+def read_list(path, nul):
+    """Paths from a list file, exactly as written: no stripping. One per line, or NUL-separated with --files-from-0."""
+    with open(path, "rb") as fh:
+        raw = fh.read()
+    parts = raw.split(b"\0" if nul else b"\n")
+    return [os.fsdecode(x) for x in parts if x != b""]
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("paths", nargs="*")
-    ap.add_argument("--files-from")
+    ap.add_argument("--files-from", help="a file with one path per line (nothing is stripped)")
+    ap.add_argument("--files-from-0", help="a file with NUL-separated paths (git diff -z, check_pr.py classify -z)")
     ap.add_argument("--words")
     ap.add_argument("--allow")
     ap.add_argument("--report")
@@ -125,8 +179,14 @@ def main():
     allow = load_allow(a.allow)
     paths = list(a.paths)
     if a.files_from:
-        paths += [l.strip() for l in open(a.files_from, encoding="utf-8") if l.strip()]
-    hits, allowed, nfiles, nbytes = scan(paths, words, allow)
+        paths += read_list(a.files_from, False)
+    if a.files_from_0:
+        paths += read_list(a.files_from_0, True)
+    try:
+        hits, allowed, nfiles, nbytes = scan(paths, words, allow)
+    except MissingPath as e:
+        sys.stderr.write("scrub_check: listed path does not exist: %r\n" % (e.args[0],))
+        return 2
     lines = ["scrub_check: %d files, %d bytes scanned" % (nfiles, nbytes),
              "patterns: %s" % ", ".join(n for n, _ in PATTERNS),
              "private word list: %d entries" % len(words),
@@ -136,8 +196,8 @@ def main():
     if len(hits) > 200:
         lines.append("  ... %d more" % (len(hits) - 200))
     lines.append("accepted on purpose: %d" % len(allowed))
-    for rel, ln, name, val in allowed[:50]:
-        lines.append("  OK  %s:%d %s %r  (%s)" % (rel, ln, name, val, allow[(rel, name)]))
+    for rel, ln, name, val, reason in allowed[:50]:
+        lines.append("  OK  %s:%d %s %r  (%s)" % (rel, ln, name, val, reason))
     txt = "\n".join(lines) + "\n"
     sys.stdout.write(txt)
     if a.report:

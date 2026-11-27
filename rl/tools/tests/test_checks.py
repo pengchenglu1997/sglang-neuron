@@ -214,7 +214,7 @@ class Docs(unittest.TestCase):
 
     def test_f4_allow_entry(self):
         self.r.write("rl/README.md", "cpu 24 cases\n")
-        self.r.write("rl/tools/scrub_allow.txt", "rl/README.md\tpublic-cpu-lint\twhy\n")
+        self.r.write("rl/tools/scrub_allow.txt", "rl/README.md\tpublic-cpu-lint\twhy\tcpu 24 cases\n")
         self.r.commit()
         ok, m = check_docs.f4(self.r.dir, os.path.join(self.r.dir, "rl/tools/scrub_allow.txt"))
         self.assertTrue(ok, m)
@@ -259,12 +259,14 @@ class Docs(unittest.TestCase):
         self.assertEqual(len(m), 1, m)
         self.assertIn("R.md:3", m[0])
 
-    def test_f8_frozen_records_skipped(self):
+    def test_f8_new_data_readme_is_linted(self):
         base = self.r.commit()
         self.r.git("checkout", "-q", "-b", "pr")
         self.r.write("rl/data/s/README.md", "currently\n")
         head = self.r.commit()
-        self.assertTrue(check_docs.f8(base, head, self.r.dir)[0])
+        ok, m = check_docs.f8(base, head, self.r.dir)
+        self.assertFalse(ok)
+        self.assertIn("rl/data/s/README.md:1", m[0])
 
     def test_f10(self):
         self.r.write("sglang_neuron/a.py", "import os\nfrom rl.x import y\n")

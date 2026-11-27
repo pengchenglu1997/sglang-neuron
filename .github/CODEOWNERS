@@ -12,5 +12,10 @@
 /rl/best.tsv          @pengchenglu1997
 /.github/workflows/   @pengchenglu1997
 /.github/CODEOWNERS   @pengchenglu1997
+# F1 (the required label rule) is its own check_pr.py and common.py, and the fixtures that pin its verdicts. The rest of
+# rl/tools/ is tier 2. Without these lines one teammate approval could change the rule that judges the same pull request.
+/rl/tools/check_pr.py @pengchenglu1997
+/rl/tools/common.py   @pengchenglu1997
+/rl/tools/tests/      @pengchenglu1997
 #
 # Tier 1 (regenerated README blocks only) is not a path rule and has no line here.
