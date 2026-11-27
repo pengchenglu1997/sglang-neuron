@@ -5,3 +5,9 @@ rl/tools/** text eol=lf
 # The workflow and CODEOWNERS are read by tests that split on LF and by bash: LF on every platform.
 .github/workflows/*.yml text eol=lf
 .github/CODEOWNERS text eol=lf
+# Imported measurement files are frozen record: no checkout or commit converts their line endings, so the sha256 values
+# of rl/data/LEGACY.sha256 hold on every platform. (The sha256 lists of rl/.gitattributes keep their own LF rule.)
+rl/data/** -text
+rl/data/LEGACY.sha256 text eol=lf
+rl/data/NOT_IMPORTED.tsv text eol=lf
+rl/data/README.md text eol=lf

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import os
 import subprocess
 import sys
 import tempfile
@@ -122,6 +123,34 @@ def main():
         r = subprocess.run([sys.executable, "-I", str(HERE / "make_patch_dir.py"), "--fork", str(repo), "--ref", "feat",
                             "--out", str(tmp / "out5")], capture_output=True, text=True)
         check(r.returncode == 0 and "%s  sampling.py" % sha(new_sampling) in r.stdout, "command line run prints the hashes")
+
+        # --fork left out: the repository that holds the script (rl/ inside the fork), whatever the current folder is
+        repo2 = tmp / "fork2"
+        repo2.mkdir()
+        git(repo2, "init", "-q", "-b", "upstream-main")
+        put(repo2, "sglang_neuron/sampling.py", b"base sampling\n")
+        put(repo2, "rl/make_patch_dir.py", (HERE / "make_patch_dir.py").read_bytes())
+        put(repo2, "rl/patch_manifest.py", (HERE / "patch_manifest.py").read_bytes())
+        git(repo2, "add", "-A")
+        git(repo2, "commit", "-q", "-m", "base")
+        git(repo2, "checkout", "-q", "-b", "feat")
+        put(repo2, "sglang_neuron/sampling.py", new_sampling)
+        git(repo2, "add", "-A")
+        git(repo2, "commit", "-q", "-m", "feature")
+        other_cwd = tmp / "elsewhere"
+        other_cwd.mkdir()
+        r = subprocess.run([sys.executable, "-I", str(repo2 / "rl" / "make_patch_dir.py"), "--ref", "feat",
+                            "--out", str(tmp / "out6")], capture_output=True, text=True, cwd=str(other_cwd))
+        check(r.returncode == 0 and "%s  sampling.py" % sha(new_sampling) in r.stdout,
+              "without --fork the script reads the repository that holds it, from any current folder: %s" % r.stderr.strip())
+        lone = tmp / "lone"
+        lone.mkdir()
+        (lone / "make_patch_dir.py").write_bytes((HERE / "make_patch_dir.py").read_bytes())
+        (lone / "patch_manifest.py").write_bytes((HERE / "patch_manifest.py").read_bytes())
+        env = dict(os.environ, GIT_CEILING_DIRECTORIES=str(tmp))
+        r = subprocess.run([sys.executable, "-I", str(lone / "make_patch_dir.py"), "--ref", "feat", "--out", str(tmp / "out7")],
+                           capture_output=True, text=True, cwd=str(other_cwd), env=env)
+        check(r.returncode == 2 and "no --fork given" in r.stderr, "without --fork and outside a git checkout: exit 2 with a message")
     if FAILS:
         print(f"SELFTEST_MAKE_PATCH_DIR FAILED {len(FAILS)} of {CHECKS[0]} checks: {FAILS}")
         return 1

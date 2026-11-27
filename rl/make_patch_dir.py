@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Build a patch folder (SGL_PATCH_DIR) from a checkout of the sglang-neuron fork. CPU only, no server.
 
-Usage:  python make_patch_dir.py --fork <fork checkout> --ref <commit or branch> --out <new folder> [--base <ref>]
+Usage:  python make_patch_dir.py [--fork <fork checkout>] --ref <commit or branch> --out <new folder> [--base <ref>]
+
+--fork defaults to the repository that holds this script (rl/ is a folder of the fork's main branch, so one checkout
+serves both the scripts and the engine commits). Pass --fork to read another checkout.
 
 The folder holds every sglang_neuron/**/*.py file that --ref changed since its merge base with --base, at its path relative to
 the package (sglang_neuron/sampling.py becomes sampling.py), which is where srv_sglang_neuron.sh mounts it.
@@ -33,6 +36,11 @@ def git(fork, *args, binary=False):
     if r.returncode != 0:
         raise RuntimeError("git %s failed: %s" % (" ".join(args), r.stderr.decode("utf-8", "replace").strip()))
     return r.stdout if binary else r.stdout.decode("utf-8").strip()
+
+
+def default_fork():
+    """Root of the repository that holds this script."""
+    return git(os.path.dirname(os.path.abspath(__file__)), "rev-parse", "--show-toplevel")
 
 
 def resolve(fork, ref):
@@ -86,11 +94,17 @@ def build(fork, ref, out, base=None):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--fork", required=True, help="checkout of the fork (read only)")
+    ap.add_argument("--fork", help="checkout of the fork (read only); default: the repository that holds this script")
     ap.add_argument("--ref", required=True, help="commit or branch to build from")
     ap.add_argument("--out", required=True, help="new folder, used as SGL_PATCH_DIR")
     ap.add_argument("--base", help="ref of the fork's copy of upstream (default: upstream-main)")
     a = ap.parse_args()
+    if a.fork is None:
+        try:
+            a.fork = default_fork()
+        except RuntimeError as e:
+            print("make_patch_dir: no --fork given and this script is not inside a git checkout: %s" % e, file=sys.stderr)
+            return 2
     if not os.path.isdir(a.fork):
         print("make_patch_dir: not a directory: %s" % a.fork, file=sys.stderr)
         return 2

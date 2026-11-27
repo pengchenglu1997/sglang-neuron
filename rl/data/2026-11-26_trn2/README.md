@@ -25,14 +25,14 @@ each sub-folder is; it repeats a number only where the file named next to it hol
   prompt length 1,024 tokens, 256 output tokens with `ignore_eos`, concurrency 1, 8 and 32, 64 requests per cell after
   4 warm-up requests. The pass names in the file names: `t0` temperature 0 (two passes, `p1` and `p2`), `t08`
   temperature 0.8 with top-k, top-p and min-p switched off in the request, `k50` temperature 0.8 with top-k 50 and top-p 0.95.
-  The request fields of each run are in the `.yaml` next to the `.csv`.
+  The request fields of each run are in the `.yaml` next to the `.csv` (the `.yaml` files of some folders were left out of this repository: see `../NOT_IMPORTED.tsv`).
 - Engine variants (patch folders are fork-branch states and are not in this repository; `s4_run.sh` and the
   `76_serve_*.jsonl` config lines name them): `rel` the released image; `main` fork main with the compile-cache stamp fix
   and the temperature sampler kernel (`RLKIT_SAMPLER_KERNEL=1`); `topk` the released `topk_topp` sampler; `kon` / `koff` the
   `topk_topp` kernel switched on / off (`RLKIT_SAMPLER_KERNEL_TOPK=1`); `lmh_on` / `lmh_off` the pre-transposed LM head
   switched on / off (`SGLANG_NEURON_LM_HEAD_PRETRANSPOSED=1` / `0`); `all` the integration branch with the temperature kernel
   and the LM head switch on, `topk_all` the same with the `topk_topp` kernel.
-- Image tag, commit hashes and the environment of each start come from the scripts; nothing here was re-measured after
+- Image tag, commit hashes and the environment of each start come from the scripts (those that no document names were left out of this repository: see `../NOT_IMPORTED.tsv`); nothing here was re-measured after
   the session.
 
 ## Folders
@@ -41,7 +41,7 @@ each sub-folder is; it repeats a number only where the file named next to it hol
 (`s4_8b.sh` for the Qwen3-8B rows). `llmbench_b_<tag>_<pass>.csv` and `.yaml` are the benchmark cells and their config;
 `76_serve_b_<tag>.jsonl` records the server start (`ready_s`, the launch environment), a 64-token precheck request and the
 exit status of each benchmark pass; `s4_profile_<tag>.jsonl` records the rollout passes of the profile runs (32 concurrent
-requests of 256 tokens each, three passes, `ignore_eos`); `driver_logs/` are the marker lines of each driver call.
+requests of 256 tokens each, three passes, `ignore_eos`); `driver_logs/` are the marker lines of each driver call (the ones that this README does not name were left out: see `../NOT_IMPORTED.tsv`).
 The first device-profile captures (`phaseA` and `phaseA2` of `s4_run.sh`: tags `q8_rel`, `q8_main`, `q06_topk`, `q06_main`,
 `q06_rel`, `q06_lmh_off`, `q06_lmh_on`, without a suffix) ran with `NEURON_RT_ENABLE_DGE_NOTIFICATIONS=1`: their rollout
 passes ran at 43.2 to 203.7 tokens per second (for example `s4_profile_q06_rel.jsonl`: 70.4, 70.3 and 70.7, against 3,029.9,
@@ -124,7 +124,7 @@ What this showed (`results/dp_table.txt`, c32, temperature 0, passes 1 and 2): t
 `host_step/` The host side of one decode step on Qwen3-0.6B and Qwen3-8B, measured with two engine switches
 (`--decode-log-interval 1` with `SGLANG_LOG_FORWARD_ITERS=1`, and `SGLANG_NEURON_HOST_TRACE`) and single flag changes
 benchmarked against a control that stayed up (`events.jsonl`: starts and ready seconds; `summary/`: tables made from the server logs
-and the host trace; `scripts/`: the summary scripts). The host trace TSV files (7 to 16 MB each), the process listing
+and the host trace; `scripts/`: the scripts that a document or another script here names; the others are listed in `../NOT_IMPORTED.tsv`). The host trace TSV files (7 to 16 MB each), the process listing
 and the server logs are not published.
 What this showed (`tables.txt` section 1, c32, temperature 0, passes 1 and 2): `p3v5` 2,364.3 and 2,356.2 and `p3v7`
 2,462.1 and 2,496.9 tokens per second, against their controls `p3c` 3,215.7 to 3,338.4; all other single changes
@@ -141,7 +141,7 @@ What this showed (`kv_summary.txt`, c32, temperature 0, passes 1 and 2): Qwen3-0
 
 `lm_head/` The pre-transposed LM head switch (`s0` / `s1`) with and without the temperature kernel (`k` / `n`), Qwen3-0.6B
 (five server starts) and Qwen3-8B (two starts): benchmark files in `results/`, the 20-prompt and 200-question GSM8K comparison in
-`cc/results/` (`summary.jsonl`; `cc/results/server_logs` are not published), the phase logs and the scripts. The benchmark
+`cc/results/` (`summary.jsonl`; `cc/results/server_logs` are not published), the phase logs and the scripts (only those that a document or another script here names; the others are listed in `../NOT_IMPORTED.tsv`). The benchmark
 cells of the two Qwen3-8B starts are in `tables.txt` section 1 (`llmbench_b_lmh_q8_s0k_*` and `llmbench_b_lmh_q8_s1k_*`); the
 switch settings differ by less than 1% in tokens per second at each concurrency there, one start each. The patch files and the
 profile archive (0.5 GB) are not published; `patch_sha256.txt` lists the sha256 of the seven patch files (paths relative to the
@@ -152,7 +152,7 @@ What this showed (`tables.txt` section 1, Qwen3-0.6B c32, temperature 0, passes 
 `devprof/` and `prof_all/` Analysis of device profiles of one decode step of TP rank 0 (four steps from step 300; neuron-explorer
 tables converted to parquet on the machine). `devprof/` covers the `_nd` captures of the released and main variants,
 the LM head switch, and the `topk_topp` kernel on/off; `prof_all/` the three all-on variants. `out/` holds the text and csv outputs
-of the scripts in `scripts/` that tell the step wall, the exclusive split of the step into math, DMA issue, DMA,
+of the scripts in `scripts/` (of `prof_all/scripts/` this repository holds only `g07_scope_ops.py` and `g08_dma_where.py`; the other scripts of that folder are listed in `../NOT_IMPORTED.tsv`) that tell the step wall, the exclusive split of the step into math, DMA issue, DMA,
 collectives and idle, the engine split, the sampler scope and the place of the vocabulary-sized transposes; `records/` are the
 profile runs' `s4_profile_*.jsonl`. The analysis scripts carry the paths of the analysis machine, which were replaced by
 `<local-path>`. The raw profiles, the parquet tables (several GB) and the written summaries are not published; the
@@ -195,7 +195,7 @@ Read from the scripts and the `76_serve_*.jsonl` config lines. `q06` / `q8`: Qwe
   the token lists differ, and logprob differences are taken before it.
 - Server logs, per-request benchmark files, raw device profiles, parquet tables, model files and compile caches are not
   published (size, and the logs name machine details). The `*.log` files of the benchmark client are not published either; the
-  `.csv` and `.yaml` are. This folder is about 2.7 MB in about 930 files.
+  `.csv` and `.yaml` are (except the files listed in `../NOT_IMPORTED.tsv`). This folder is about 2.7 MB in about 930 files.
 - The written session summaries of each line are internal working notes and are not published; what they say that matters
   for reading these files is in this README.
 - Model output text in the `.jsonl` and `.json` files is the answer to public GSM8K questions or short fixed prompts; the
