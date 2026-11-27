@@ -17,7 +17,7 @@ Read this first:
   are in [RESULTS.md](RESULTS.md) section 8.
 - Measured results that do not involve a kernel are in [RESULTS.md](RESULTS.md).
 
-Where this fits. Goal G3 is one or two NKI kernel optimisations with before/after numbers. The merge kernel serves the
+Where this fits. The kernel goal is one or two NKI kernel optimisations with before/after numbers. The merge kernel serves the
 adapter update of the RL loop (section 1). The sampler kernel was the second candidate. It was not scheduled when this
 file was written on 2026-11-23, and it was built and run on 2026-11-24 (section 2). Sections 3 and 4 record what was
 looked at and not taken, so nobody repeats the search.
@@ -255,8 +255,8 @@ Limits:
 - the device profiles of the session are not read, so there is no instruction-time figure for the sampler scope with and
   without the kernel.
 
-What remains: a `topk_topp` mode kernel; a full RL loop with the kernel on; larger models; a proposal upstream (nothing
-has been sent).
+What remains: a `topk_topp` mode kernel; a full RL loop with the kernel on; larger models; a proposal upstream (draft pull request 25
+upstream carries the temperature-mode kernel, opened 2026-11-25, Seattle time).
 
 ### Measured basis (written 2026-11-23, before the kernel existed)
 
@@ -317,7 +317,7 @@ the gain in an RL iteration is not measured, because no RL loop ran with the ker
 that. At most 1.09x of the 0.6B RL iteration if the kernel closes the gap, 1.14x as a hard ceiling (our calculation in
 our analysis notes, not published; basis not re-derived here). Qwen3-0.6B only. The 8B figure
 is unmeasured because no 8B loop has run. The kernel is therefore a small gain on its own; its value is also the
-engineering evidence (G3), if step 0 does not remove the reason.
+engineering evidence, if step 0 does not remove the reason.
 
 ### Design in short, and acceptance (targets written 2026-11-23, before the build)
 
@@ -370,7 +370,7 @@ Not taken now:
   the context slope is therefore unexplained, not excluded.
 - At the RL loop's context of 1024 the bound is about 1.04x of the iteration, by the design's own arithmetic.
 - The context ladder (short rows run a smaller-context graph) is expected to remove much of the long-context cost with
-  no kernel. That is an estimate; the measurement with the ladder on (`docs/experiment-plan-2026-11-22.md`, W1.2) has
+  no kernel. That is an estimate; the measurement with the ladder on (step W1.2 of `docs/experiment-plan-2026-11-22.md` in the run repository) has
   not been run.
 - Swapping only the attention core out of the fused attention block loses its fused QKV, RoPE and output projection.
 - An upstream author is working on early exit in attention (upstream PRs 4 and 8).
@@ -436,5 +436,6 @@ Reading, with limits:
 - One run each, one model size, one tensor-parallel layout. None of this is a statement about 8B or about 27-32B.
 - Added 2026-11-26: the LM head's weight layout is now a switch on `main`, `SGLANG_NEURON_LM_HEAD_PRETRANSPOSED=1`
   (no kernel of its own; [RESULTS.md](RESULTS.md) section 9 has its trn2 speed and correctness rows). Device profiles
-  of those servers were captured but not analysed, so this table has no row for it and whether the per-step transpose
-  of the vocabulary shard is gone is not read from a profile.
+  of those servers were analysed later (`devprof/`, `prof_all/` in the public data folder, linked from
+  [RESULTS.md](RESULTS.md) section 9); this table has no row for it and does not state whether the per-step transpose
+  of the vocabulary shard is gone.
