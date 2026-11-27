@@ -27,6 +27,8 @@ names (for the switch tests). Then, at the TP4 shard width 37,984, against the r
   K8  padded vocabulary (width * world > vocab, large values in the padded columns) and non-finite logits (-inf
       columns, a whole -inf shard, +inf, NaN): whole output bit-equal
   K9  128 rows run; 129 rows raise an error that names RLKIT_SAMPLER_KERNEL_TOPK
+  K10 the vocabulary mask is applied on the kernel path also when no column is padded (width * world == vocab), as the
+      released path does: the same number of vocabulary-mask masked_fill calls per rank in both paths, and not zero
   --sim  (WSL with nki 0.7.0): the kernel stage is the NKI kernel in nki.simulate; restricted rows must be bit-equal,
          greedy rows must have equal tokens and logprobs (also on the K8 inputs), unrestricted sampled rows are counted (the simulator's log is not torch.log)
 Exit 0 when every test passes. No device, no docker, no network.
@@ -503,6 +505,38 @@ def k9(S, K, T):
                  f"128 rows: {'ran' if out[0][1] is None else out[0][1]}; 129 rows: {msg or 'no error'}")
 
 
+def k10(S, K, T):
+    """Unpadded vocabulary (width * world == vocab): the kernel path applies the vocabulary mask, as the released path
+    does. The mask changes no value there (all-false), so the outputs cannot show it; count the masked_fill calls whose
+    mask is the [1, width] vocabulary mask instead."""
+    gen = torch.Generator().manual_seed(1010)
+    rows = 8
+    logits, keys = make_logits(rows, gen), make_keys(S, rows, gen)
+    temps, filters = torch.full((rows,), 0.8), make_filters(S, rows, 50, 0.95, 0.0)
+    width = VOCAB // 4
+    real, calls = torch.Tensor.masked_fill, []
+
+    def counting(self, mask, value):
+        if tuple(mask.shape) == (1, width):
+            calls.append(1)
+        return real(self, mask, value)
+
+    counts = {}
+    torch.Tensor.masked_fill = counting
+    try:
+        for label, fn in (("released", released_fn(S, temps, keys, filters, 0)),
+                          ("kernel", kernel_fn(S, K, T, temps, keys, filters, 0))):
+            calls.clear()
+            B.run_tp(fn, logits, temps, keys)
+            counts[label] = len(calls)
+    finally:
+        torch.Tensor.masked_fill = real
+    ok = counts["kernel"] > 0 and counts["kernel"] == counts["released"]
+    return check("K10 the vocabulary mask is applied on the kernel path with an unpadded vocabulary", ok,
+                 f"vocabulary-mask masked_fill calls over the 4 ranks: released {counts['released']}, "
+                 f"kernel {counts['kernel']}")
+
+
 # ----------------------------------------------------------------------------------------------- SIM
 def sim_tests(S, K, T):
     os.environ.setdefault("NEURON_PLATFORM_TARGET_OVERRIDE", "trn2")
@@ -596,6 +630,7 @@ def main():
         k3(S, K, T)
         k8(S, K, T)
         k9(S, K, T)
+        k10(S, K, T)
         k4(S, K, T)
         k5(S, K, T)
         k2(S, K, T, a.seeds)

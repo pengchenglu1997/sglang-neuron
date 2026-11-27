@@ -11,8 +11,8 @@ Read this first:
   validated: its acceptance rule is open (section 1).
 - The sampler kernel (branch `feat/sampler-kernel`) was built and run on hardware on 2026-11-24, at Qwen3-0.6B and
   Qwen3-8B, for the `temperature` sampler only (section 2). Changed 2026-11-26: the same kernel is used in the
-  `topk_topp` mode on branch `feat/sampler-kernel-topk-topp`, in the CPU tests and the NKI simulator only (section 2,
-  "`topk_topp` mode").
+  `topk_topp` mode on branch `feat/sampler-kernel-topk-topp`, in the CPU tests and the NKI simulator, and on a device
+  once on 2026-11-26 at Qwen3-0.6B, TP4 (section 2, "`topk_topp` mode"; RESULTS.md section 10).
 - Every number has a condition and a source file. Numbers marked "estimate" are not measurements. A "target" is a
   target, with its basis.
 - All profile numbers in section 5 are Qwen3-0.6B, TP4, one run each, from 2026-11-21. The hardware results of 2026-11-24
@@ -214,8 +214,8 @@ global top 256 tokens per row (`TOP_K_MAX`); `temperature` mode does not apply t
 admission. On a device-sampling server, a request with top-k and top-p therefore runs in `topk_topp` mode. The kernel designed here replaces the
 `temperature` mode only, so it would not run under that setting. Changed 2026-11-25: the kernel as built replaces the
 `temperature` mode only, so it still does not cover that setting. Covering it needs a `topk_topp` mode kernel, which does
-not exist. Changed 2026-11-26: a `topk_topp` path with the same kernel exists in the CPU simulator only (subsection
-"`topk_topp` mode" below); on hardware the setting is still not covered.
+not exist. Changed 2026-11-26: a `topk_topp` path with the same kernel exists (subsection "`topk_topp` mode" below). It
+ran on a device on 2026-11-26 at Qwen3-0.6B, TP4; the comparison of restricted sampled rows token by token was not run.
 
 The conclusion that stood here on 2026-11-23, "the sampler kernel is not scheduled; the second kernel is chosen from a
 device profile", no longer holds: the kernel was built and run on 2026-11-24. The device profiles taken in that session
@@ -260,13 +260,26 @@ Limits:
   without the kernel.
 
 What remains: a `topk_topp` mode kernel; a full RL loop with the kernel on; larger models; a proposal upstream (nothing
-has been sent). Changed 2026-11-26: the `topk_topp` path below is written and CPU-tested; its hardware run remains.
+has been sent). Changed 2026-11-26: the `topk_topp` path below was written and CPU-tested, and ran on a device the same
+day (Qwen3-0.6B, TP4; [RESULTS.md](RESULTS.md) section 10).
 
-### `topk_topp` mode (CPU simulator only, 2026-11-26)
+### `topk_topp` mode (CPU simulator, 2026-11-26; first hardware run 2026-11-26)
 
-Status: written and tested on the CPU and in the NKI 0.7.0 simulator only. Not run on a device. No speed claim. The test
-results are recorded in the team hub, not here (cpu-only work). Branch `feat/sampler-kernel-topk-topp`, a `cpu-only`
-pull request to `integration`; switch `RLKIT_SAMPLER_KERNEL_TOPK=1` (unset or 0: the released function body runs).
+Status: written and tested on the CPU and in the NKI 0.7.0 simulator; run on a device on 2026-11-26 at Qwen3-0.6B, TP4,
+one session (RESULTS.md section 10). Branch `feat/sampler-kernel-topk-topp` (merged into `integration`); switch
+`RLKIT_SAMPLER_KERNEL_TOPK=1` (unset or 0: the released function body runs).
+
+Hardware, 2026-11-26 (Qwen3-0.6B, TP4, temperature 0, 20 prompts, batch 1, one run each). The first device run, with the
+vocabulary mask applied only when a padded column exists, gave other logprobs than the switch off: 0 of 20 first-token
+logprobs bit-equal (this version is "before the fix"). The kernel path now applies the mask always, as the released path
+does. The device ran that change as the same two statements under `if True:`; this exact file text was not itself run.
+With the mask applied, kernel on and kernel off are bit-equal on the 20 prompts: first-token logprobs 20 of 20, top-20
+vectors 20 of 20, every generated position 878 of 878, token sequences 20 of 20. Speed with the mask applied at
+concurrency 32, temperature 0.8, top-k 50, top-p 0.95: 2,822.6 and 2,822.4 tok/s with the kernel on, 2,617.6 and 2,616.9
+with it off (one cold start per server, other jobs on the machine). The cause of the difference when the mask was skipped
+was not determined: removing the mask on the released path alone changed nothing. Not run: temperature above 0 compared
+token by token, batch above 1 for the comparison, Qwen3-8B, a padded vocabulary on a device. Conditions and files:
+RESULTS.md section 10. Below, "not known until run" lists what the hardware run did not settle.
 
 What it replaces. Of the shard-local stage of `sample_filtered_sharded_logits` (`sampling.py` v0.1.0, lines 364-378)
 only the unfiltered draw: the per-column hash noise, the Gumbel score, the shard maximum and its smallest id. These come
@@ -299,19 +312,21 @@ released `topk_topp` path over a simulated TP4 group, bit-equal outputs with the
 256 / off, top-p 0.5 / 0.95 / 1, min-p 0 / 0.1, temperature-0 rows, mixed per-row settings, ties, rows 1 / 8 / 32, a padded
 vocabulary, non-finite logits (-inf, +inf, NaN); the switch unset leaves the released path and the switch on gives the
 released output; 129 rows raise the error that names the switch; planted faults are caught; in the simulator, restricted
-rows bit-equal and temperature-0 tokens and logprobs equal (also on the padded and non-finite inputs). Whether these hold on a device is not known.
+rows bit-equal and temperature-0 tokens and logprobs equal (also on the padded and non-finite inputs). These are CPU and simulator results; the device comparison is the hardware paragraph above.
 
 Compile flags. `models/host.py` (`neuron_compiler_args`) keeps the default arguments for a decode that traces the device
 top-k, which `topk_topp` always does, because `-O2` miscompiles that top-k (section "The compile-flag question" below).
 This branch does not change that rule. So the kernel would compile at the default arguments in this mode, a
-configuration none of its hardware runs used (those were `temperature` decodes, by the code at `-O2`). Not known until
-run.
+configuration none of the `temperature` mode's hardware runs used (those were `temperature` decodes, by the code at
+`-O2`). The `topk_topp` server of 2026-11-26 compiled and served at this configuration (RESULTS.md section 10); how it
+compares with `-O2` was not run.
 
 Compile cache. `sampling.py` and `rlkit_sampler_topk.py` are kernel sources of the cache digest (`kernel_sources` follows
 the imports of a kernel file), so a server built from this branch gets another digest than one built from
 `integration`, with the switch on or off; a cache folder stamped by an `integration` server is refused.
 
-Not known until run on a device:
+Not known until run on a device (written before the run of 2026-11-26; that run showed that the graph loads and serves at
+Qwen3-0.6B, TP4, and gave the speed cells of RESULTS.md section 10.3; the rest stays open):
 - whether the decode graph with the kernel next to the rotational top-k loads and runs: the engine's comment records
   that a GpSimd top-k hung the GpSimd engine when co-resident with vector work in one NEFF, and this kernel uses GpSimd
   integer multiplies;

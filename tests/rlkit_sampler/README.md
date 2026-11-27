@@ -1,11 +1,12 @@
-# Sampler kernel for SGLang-Neuron v0.1.0 (temperature sampler; topk_topp mode in the CPU simulator only)
+# Sampler kernel for SGLang-Neuron v0.1.0 (temperature sampler; topk_topp mode: CPU simulator and one hardware session)
 
 One NKI kernel that replaces the shard-local stage of the engine's temperature sampler. It is off by default. Changed
 2026-11-25: it was sent upstream as draft pull request 25 (sgl-project/sglang-neuron) from branch `feat/sampler-kernel`.
 
 Changed 2026-11-26: branch `feat/sampler-kernel-topk-topp` (a `cpu-only` pull request to `integration`) uses the same
-kernel, unchanged, in the `topk_topp` mode behind a second switch, `RLKIT_SAMPLER_KERNEL_TOPK=1`. That part has run in
-the CPU tests and the NKI simulator only; nothing of it has run on a device. See [topk_topp mode](#topk_topp-mode-cpu-and-simulator-only)
+kernel, unchanged, in the `topk_topp` mode behind a second switch, `RLKIT_SAMPLER_KERNEL_TOPK=1`. That part ran in
+the CPU tests and the NKI simulator, and on a device once (2026-11-26, Qwen3-0.6B, TP4; results in
+[docs/rl/RESULTS.md](../../docs/rl/RESULTS.md) section 10). See [topk_topp mode](#topk_topp-mode)
 below. Everything else on this page is about the `temperature` mode.
 
 Where it is: written on branch `feat/sampler-kernel`, on top of `4e24326`, the v0.1.0 snapshot (the commit
@@ -186,8 +187,8 @@ CPU torch: 11 of 11 passed (also run again on this branch, same result).
 
 ## Limits
 
-- Temperature sampler only on hardware. `greedy` is untouched, and top logprobs > 0 raises with the switch on. The
-  `topk_topp` path has run in the CPU tests and the simulator only (section below).
+- The `temperature` mode's hardware runs are the ones above. `greedy` is untouched, and top logprobs > 0 raises with the
+  switch on. The `topk_topp` path ran on a device once, Qwen3-0.6B at TP4 (section below).
 - Qwen3-0.6B and Qwen3-8B only, TP4 (and TP1 at 0.6B), on one trn2.48xlarge. Other models, other vocabulary sizes and
   padded vocabularies were not run (a padded shard keeps the mask in torch; not run).
 - The gain at 8B is small: 4.5 to 6.6 percent over the six cells above (from the unrounded values; the rounded table
@@ -217,10 +218,28 @@ CPU torch: 11 of 11 passed (also run again on this branch, same result).
   released sampler's, and the token comparison under concurrency (above) differs on some requests, but the log shows the
   kernel for one row count only.
 
-## topk_topp mode (CPU and simulator only)
+## topk_topp mode
 
-Branch `feat/sampler-kernel-topk-topp`, a `cpu-only` pull request to `integration`. Nothing here has run on a device,
-and there is no speed claim. The CPU and simulator results are recorded in the team hub, not here (AGENTS.md rule 6).
+Branch `feat/sampler-kernel-topk-topp` (merged into `integration`). Written and tested on the CPU and in the simulator;
+the CPU and simulator results of the first version are recorded in the team hub, not here (AGENTS.md rule 6). It ran on
+a device once, on 2026-11-26 (below).
+
+Hardware, 2026-11-26, Qwen3-0.6B, TP4, temperature 0, 20 prompts one at a time, 48 tokens, 20 top logprobs, one run
+each (details and files: [docs/rl/RESULTS.md](../../docs/rl/RESULTS.md) section 10):
+- Before the fix, the kernel path applied the padded-vocabulary mask only when a column is padded; the released path
+  always does. Qwen3-0.6B at TP4 has no padded column. Kernel on against kernel off: first-token logprob bit-equal on
+  0 of 20 prompts, same token sequences on 14 of 20.
+- With the mask applied always (the fix: the two statements are no longer under a condition), kernel on against kernel
+  off: first-token logprobs 20 of 20, top-20 vectors 20 of 20, all 878 generated positions, and token sequences 20 of 20
+  bit-equal. The device ran the same two statements under `if True:`; the file text now in the repository was not itself
+  run.
+- Speed with the mask applied, concurrency 32, temperature 0.8, top-k 50, top-p 0.95, two passes: 2,822.6 and 2,822.4
+  tok/s with the kernel on, 2,617.6 and 2,616.9 with it off. One cold start per server, one session, other jobs on the
+  machine.
+- Why the compiled graph differs when the kernel is present and the mask absent was not determined: removing the mask
+  on the released path alone changed nothing in these 20 prompts.
+- Not run: temperature above 0 compared token by token, batch above 1 for the comparison, Qwen3-8B, a padded
+  vocabulary on a device, `RLKIT_SAMPLER_KERNEL=1` together with this fix.
 
 Switch: `RLKIT_SAMPLER_KERNEL_TOPK=1` with `SGLANG_NEURON_SAMPLER=topk_topp`, read once at import. Unset or `0` runs the
 released function body; `RLKIT_SAMPLER_KERNEL=1` does not reach the `topk_topp` mode.
@@ -266,6 +285,8 @@ Tests, `tests/rlkit_sampler/selftest_sampler_topk.py` (CPU; `--sim` adds the NKI
 - K8: a padded vocabulary (width times world above the vocabulary size, large values in the padded columns) and
   non-finite logits (-inf columns, a whole -inf shard, +inf, NaN): the whole output is bit-equal.
 - K9: 128 rows run; 129 rows raise an error that names `RLKIT_SAMPLER_KERNEL_TOPK`.
+- K10: with no padded column (width times world equal to the vocabulary size), the kernel path applies the vocabulary
+  mask, counted as in the released path (the mask changes no value there, so the outputs cannot show it).
 - SIM: the kernel stage is the NKI kernel in `nki.simulate`. Restricted rows must be bit-equal and temperature-0 rows
   must have equal tokens and logprobs, also on the K8 inputs; unrestricted sampled rows are counted, not required.
 `selftest_sampler_kernel.py`'s T5 now allows the second guarded branch.
@@ -276,12 +297,12 @@ with the switch on or off. Give it a compile-cache folder of its own.
 
 Compile flags. `models/host.py` keeps the decode graph at the default arguments (not `-O2`) whenever the mode is
 `topk_topp`, because `-O2` miscompiles the device top-k; this branch does not change that. The temperature kernel's
-hardware runs were in a decode that, by the code, compiled at `-O2`; how the kernel compiles and runs at the default
-arguments is not known until run.
+hardware runs were in a decode that, by the code, compiled at `-O2`. The `topk_topp` server of 2026-11-26 compiled and
+served at the default arguments (the engine records that a GpSimd top-k hung when co-resident with vector work in one
+NEFF; no hang was seen at Qwen3-0.6B, TP4).
 
-Not known until run on a device: whether the decode graph with the kernel and the rotational top-k together loads and
-runs (the engine records that a GpSimd top-k hung when co-resident with vector work in one NEFF; this kernel uses GpSimd
-integer multiplies); whether restricted rows then give the released server's tokens; any speed. The script
+Not run on a device: whether restricted rows (temperature above 0 with top-k, top-p or min-p) give the released
+server's tokens, compared token by token; Qwen3-8B; a padded vocabulary. The script
 `hardware/85_sampler_topk_hw.py` checks these (not run): released `topk_topp` servers A and A2 (control) against the
 kernel server B, temperature 0, the RL setting and a min-p setting with seeds (must match), unfiltered sampled requests
 (counted), the kernel's log line, concurrent requests (information only), and an optional llmbench.
