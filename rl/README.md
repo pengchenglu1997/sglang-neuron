@@ -37,6 +37,8 @@ level because the records, `backends.json` and every script's `sys.path` name th
 | `bash rl/tools/fork_state.sh` | branches, open pull requests, our upstream pull requests and issues, what main has that integration lacks |
 | `bash rl/tools/upstream_ready.sh <branch>` | whether a branch carries only engine paths |
 | `python rl/tools/rewrite_links.py` | the links that still point into the former run repository (dry run) |
+| `python rl/tools/migration/numbers_moved.py --base origin/main` | every numeral a documentation change removed from `README.md` and `docs/rl/`, and the line of `rl/` that holds it now |
+| `python rl/tools/migration/integration_lines.py` | the lines `docs/rl/` has only on `integration`, and whether each is on `main` now |
 | `python rl/tools/scrub_check.py <paths>` | machine, account and name leaks, before every push |
 
 ## Selftests

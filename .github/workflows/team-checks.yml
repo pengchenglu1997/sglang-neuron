@@ -16,8 +16,9 @@ name: team-checks
 #       A pull request into integration that changes a team path must be a sync from main: every team path at the head
 #       equals main (rl/tools/check_pr.py, sync rule).
 #   F9  selftests of the tools                              required (fails the job)
-#   F2-F8, F10                                              report mode: printed as warnings, the job never fails
-# F5 (generated blocks) runs best.py, switches.py and check_tables.py in the report job below; it fails nothing yet.
+#   F2-F8, F10                                              fail the job "F2-F8 and F10" (each check is run, and every failure is printed)
+# F5 (generated blocks) runs best.py, switches.py and check_tables.py in that job. A document without the markers is
+# reported as not checked and passes; rl/tools/tests/test_docs_blocks.py (F9) requires the markers in README.md and RESULTS.md.
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled, edited]
@@ -98,7 +99,7 @@ jobs:
           echo "base=$BASE_REF labels=$LABELS_JSON changed paths=$(tr -cd '\0' < "$RUNNER_TEMP/paths.z" | wc -c)"
           python -I "$f1run/check_pr.py" f1 --base "$BASE_REF" --labels-json "$LABELS_JSON" --paths-file "$RUNNER_TEMP/paths.z" \
             --head "$HEAD_SHA" --main "${MAIN_SHA:-}" \
-            || { echo "::error::F1: label rule failed. See AGENTS.md rule 6 and rl/tools/check_pr.py."; exit 1; }
+            || { echo "::error::F1: label rule failed. See AGENTS.md section 3 and rl/tools/check_pr.py."; exit 1; }
 
   f9-selftests:
     name: F9 selftests
@@ -127,8 +128,8 @@ jobs:
           done
           echo "selftest scripts run: $n"
 
-  report:
-    name: F2-F8 and F10 report
+  checks:
+    name: F2-F8 and F10
     if: github.repository == 'pengchenglu1997/sglang-neuron'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -145,7 +146,7 @@ jobs:
           set -eu
           git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
           echo "MAIN_SHA=$(git rev-parse --verify 'refs/remotes/origin/main^{commit}')" >> "$GITHUB_ENV"
-      - name: Report-mode checks (printed, never failing)
+      - name: Team checks F2-F8 and F10 (any failing check fails the job)
         env:
           LABELS_JSON: ${{ toJson(github.event.pull_request.labels.*.name) }}
           PR_BODY: ${{ github.event.pull_request.body }}
@@ -153,21 +154,22 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          # set -e: a failing git or classify step stops the job; it must never end in "ok". Only the checks run by
-          # step() below are report mode.
+          # set -e: a failing git or classify step stops the job. A check run by step() does not stop the others: every
+          # failure is printed, and the job fails at the end.
           set -eu
           T=rl/tools
+          fail=0
           git diff --name-only -z --no-renames "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/paths.z"
           git diff --name-only -z --no-renames --diff-filter=d "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/changed_alive.z"
           python $T/check_pr.py classify --kind team -z < "$RUNNER_TEMP/changed_alive.z" > "$RUNNER_TEMP/team_files.z"
           printf '%s' "$PR_BODY" > "$RUNNER_TEMP/body.txt"
-          step() { name="$1"; shift; echo "::group::$name"; if "$@"; then echo "$name: ok"; else echo "::warning::$name would fail (report mode)"; fi; echo "::endgroup::"; }
+          step() { name="$1"; shift; echo "::group::$name"; if "$@"; then echo "$name: ok"; else echo "::error::$name failed"; fail=1; fi; echo "::endgroup::"; }
           step "F2 hardware evidence" python $T/check_pr.py f2 --labels-json "$LABELS_JSON" --paths-file "$RUNNER_TEMP/paths.z" --body-file "$RUNNER_TEMP/body.txt" --head "$HEAD_SHA" --main "$MAIN_SHA"
           step "F3 scrub of changed team files" python $T/scrub_check.py --files-from-0 "$RUNNER_TEMP/team_files.z" --allow $T/scrub_allow.txt
           step "F4 public CPU lint" python $T/check_docs.py f4 --base "$BASE_SHA"
           # F5: best.tsv rows and the best blocks; the switches table and the default-on exception list (only where the
           # base is main or integration, diffed against upstream-main); make_tables.py output against tables.txt.
-          # A document without a generated block is reported as not checked until the docs step adds the markers.
+          # A document without a generated block is reported as not checked (test_docs_blocks.py requires the markers).
           step "F5 best.tsv and best blocks" python $T/best.py --check README.md docs/rl/RESULTS.md
           if [ "$BASE_REF" = main ] || [ "$BASE_REF" = integration ]; then
             step "F5 switches" python $T/switches.py --check README.md --base origin/upstream-main --branch "HEAD=$BASE_REF"
@@ -179,4 +181,4 @@ jobs:
           step "F7 links and paths" python $T/check_docs.py f7 --base "$BASE_SHA"
           step "F8 state wording on added lines" python $T/check_docs.py f8 --base "$BASE_SHA" --head "$HEAD_SHA"
           step "F10 engine files do not mention rl/ and symlinks" python $T/check_docs.py f10
-          exit 0
+          exit "$fail"
