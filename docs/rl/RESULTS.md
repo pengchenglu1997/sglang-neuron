@@ -17,6 +17,15 @@ Rules for reading this file:
 Abbreviations: TP4 is tensor parallel over 4 NeuronCores (one rollout server). "Layout" names the machine layout and the
 sync path.
 
+Names in file and step labels:
+
+- H1 to H5: the hardware steps of the LoRA merge kernel, table in [KERNELS.md](KERNELS.md) section 1.
+- W1.2 and similar: numbered steps of `docs/experiment-plan-2026-11-22.md` in the run repository.
+- `rNN` in a result file name (`82_sampler_kernel_r12.md`): the run that wrote the file; the scripts are in the run
+  repository, `docs/EXPERIMENTS.md`.
+- `s4_*.sh` and folders such as `i12_vllm_start/`: the scripts and result folders of the 2026-11-26 session in the run
+  repository; the README of [data/2026-11-26_trn2](https://github.com/pengchenglu1997/trainium-sglang-rl/tree/main/data/2026-11-26_trn2) says what each folder holds.
+
 ## 1. RL loop at Qwen3-0.6B
 
 Loop: `30_rl_loop.py`, GRPO-style policy gradient with a LoRA trainer, GSM8K. Layout for the trn2 rows: one trn2.48xlarge,
@@ -225,7 +234,8 @@ Smoke test at 0.6B, not a load test: 10 updates in a row all succeeded. One upda
 HTTP errors, took 0.59 s, and the answers after it equal the reference of the new weights. Not run: 100 updates in a row,
 an update under a sustained load. Radix cache: only an indirect check ran (the first prompt, cached before the update,
 gave the fresh-start answer after it, difference 0.0); this shows no stale entry was served for that prompt, not that the
-cache was flushed. Nothing was posted to the pull request.
+cache was flushed. These results were posted to upstream pull request 20 on 2026-11-25 (Seattle time) as a
+[comment](https://github.com/sgl-project/sglang-neuron/pull/20#issuecomment-7182387872).
 
 ### 8.2 Compile-cache stamp race
 
@@ -272,9 +282,14 @@ Qwen3-8B, prompt 1024, 256 output tokens, SGLang-Neuron v0.1.0 released defaults
 | 8 | 604.8 | 0.211 s | 606.8 |
 | 32 | 1,419.7 | 0.744 s | 1,425.9 |
 
-There is no 8B pair. vllm-neuron did not start Qwen3-8B in two attempts (TP4, max-model-len 4096, container). The
+vllm-neuron on Qwen3-8B: it did not start in two attempts on 2026-11-24 (TP4, max-model-len 4096, container). The
 compiler `neuronx-cc` exited with code 70 and the error `NCC_EVRF059`: the kernel file of
-`vendored_kernels.rotational_topk` "does not exist on the host". We did not look for the cause.
+`vendored_kernels.rotational_topk` "does not exist on the host". The start tests of 2026-11-26 found that this error comes from a stale NKI
+compile-result index in a reused cache folder (`i12_vllm_start/`, `i34_nki_index/` in the public data folder), and
+vllm-neuron 0.29.0.1.2.0 on Qwen3-8B (TP4, max-model-len 4096, start on an empty cache folder) ran the same benchmark:
+1,126.9 and 1,112.4 tok/s at concurrency 32, TTFT p50 0.909 s and 0.955 s (two passes; files
+`serving/llmbench_b_q8_vllm_p{1,2}.csv` in [data/2026-11-26_trn2](https://github.com/pengchenglu1997/trainium-sglang-rl/tree/main/data/2026-11-26_trn2)). The SGLang-Neuron rows of the same session are in
+section 9.
 
 ### 8.4 Serving changes, Qwen3-0.6B
 
@@ -455,12 +470,11 @@ Conditions for every row of this section:
 - One session. Other jobs (compiles and benchmarks of other work) ran on the same machine during every row; which chips
   they used was not recorded. The container list before and after each benchmark is in the result logs. No row was
   repeated on a quiet machine.
-- Provenance: the result files do not record the image tag, the instance type or the llmbench commit. The image tag and
-  the full llmbench commit (`08f416347db19bb45ff2489b8a69eacef62b6875`) are pinned in the session's setup script, and
-  the instance type is in the `neuron-ls` line of the session's setup log. Neither is in the public data yet.
+- Provenance: the result files do not record the image tag, the instance type or the llmbench commit. They are stated in
+  the "Conditions" of the README of the [public data folder](https://github.com/pengchenglu1997/trainium-sglang-rl/tree/main/data/2026-11-26_trn2).
 - Every request of every cell succeeded (0 errors).
-- The result files of this section (llmbench summaries, start-up events, the answers of the correctness check, server
-  logs) are not in the public data repository yet.
+- The result files of this section are in the [public data folder](https://github.com/pengchenglu1997/trainium-sglang-rl/tree/main/data/2026-11-26_trn2): llmbench summaries in `lm_head/results/`, the
+  correctness check in `lm_head/cc/results/`, start-up records in `serving/`. Server logs are not published.
 
 Qwen3-0.6B:
 
@@ -537,7 +551,8 @@ benchmark start from the server's own cache):
 
 Limits: one session on a shared machine; two passes on one start per server, except switch 1 without the kernel (two starts); temperature 0 only in the
 speed rows; `main` has no in-place weight reload, so a weight update with the switch on was not run; whether the
-decode graph drops the per-step transpose was not read from a device profile (profiles were captured, not analysed);
+decode graph drops the per-step transpose is not stated here; the device profiles of this session were analysed later (`devprof/` and `prof_all/` in the
+public data folder, for the transpose `devprof/out/g04_transpose_where.txt`);
 not run inside an RL loop. The switch adds one vocabulary shard per rank on a tied model (Qwen3-0.6B); Qwen3-8B is
 untied, its LM head only changes layout.
 
@@ -559,7 +574,7 @@ Conditions for every row of this section:
   compile cache (94 files). The servers of 10.2 started on empty caches (0 files); the 10.3 servers each had a cache
   directory of their own, and the file count at start was not recorded. Other jobs ran on the same machine, on other
   chips. No row was repeated on a quiet machine.
-- Result files are not in the public data repository yet; names below are the files of the session.
+- Result files are in the [public data folder](https://github.com/pengchenglu1997/trainium-sglang-rl/tree/main/data/2026-11-26_trn2): `i37_topk_kernel/`, `correctness/` and `serving/`.
 
 ### 10.1 Before the fix: the mask skipped on the kernel path (information)
 
