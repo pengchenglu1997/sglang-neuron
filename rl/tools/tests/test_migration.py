@@ -56,13 +56,16 @@ RUN = {
     S + "h/helper_unique.sh": "x\n",
     S + "h/dup.sh": "x\n",
     S + "i/dup.sh": "x\n",
+    S + "m/analysis_named.py": "x\n",
+    S + "n/leaf/deep.log": "named only as a leaf folder with its slash: leaf/\n",
     S + "j/hub_named.py": "x\n",
     S + "j/data.csv": "1,2\n",
     S + "j/mutual_a.sh": "mutual_b.sh\n",
     S + "j/mutual_b.sh": "mutual_a.sh\n",
 }
 FORK = {"README.md": "see the fork readme\n", "docs/rl/RESULTS.md": "result file k/fork_named.log\n", S + "k/fork_named.log": "x\n"}
-HUB = {"ledger/I1.md": "raw file hub_named.py was used\n", "OKR.md": "dup.sh is mentioned but is not unique\n"}
+HUB = {"ledger/I1.md": "raw file hub_named.py was used\n", "OKR.md": "dup.sh is mentioned but is not unique\n",
+       "analysis/2026-01-01_note.md": "the analysis reads analysis_named.py and the folder leaf/\n"}
 
 
 class SelectImport(unittest.TestCase):
@@ -116,6 +119,17 @@ class SelectImport(unittest.TestCase):
             self.assertIn(why, res[p][1], p)
         for p in (S + "c/sibling.sh", S + "g/lost.log", S + "serving/run.log", S + "h/dup.sh", S + "i/dup.sh", S + "j/mutual_a.sh", S + "j/mutual_b.sh"):
             self.assertEqual(res[p][0], "D", "%s: %s" % (p, res[p]))
+
+    def test_hub_analysis_is_a_source(self):
+        res, _ = self.select()
+        self.assertEqual(res[S + "m/analysis_named.py"][0], "KX")
+        self.assertIn("hub text", res[S + "m/analysis_named.py"][1])
+
+    def test_leaf_folder_with_slash_is_not_a_reference(self):
+        # documented rule: a one-word folder counts only as the parent relative to the session ("serving/"),
+        # not as a deeper leaf folder ("leaf/" for n/leaf/deep.log)
+        res, _ = self.select()
+        self.assertEqual(res[S + "n/leaf/deep.log"][0], "D")
 
     def test_hub_reason_names_no_hub_file(self):
         res, out = self.select()
@@ -175,6 +189,52 @@ class SelectImport(unittest.TestCase):
         text = r.stdout.decode()
         self.assertEqual(r.returncode, 1, text)
         self.assertIn("rl/README.md".replace("rl/", "") + " names " + S + "g/lost.log", text)
+
+    def test_complete_import_in_two_commits(self):
+        res, _ = self.select()
+        dropped = sorted(p for p, v in res.items() if v[0] == "D")
+        self.assertTrue(dropped)
+        empty = os.path.join(self.tmp.name, "empty.txt")
+        open(empty, "w").close()
+        target = make_repo(self.tmp.name, "target2", {"keep.txt": "k\n"})
+        git(target, "fetch", "-q", self.runrepo, self.f)
+        idx = os.path.join(self.tmp.name, "idx2")
+        env = dict(os.environ, GIT_INDEX_FILE=idx)
+        subprocess.check_call(["git", "-C", target, "read-tree", self.f], env=env)
+        for p in dropped:
+            subprocess.check_call(["git", "-C", target, "update-index", "--force-remove", "--", p], env=env)
+        tree = subprocess.check_output(["git", "-C", target, "write-tree"], env=env).decode().strip()
+        git(target, "read-tree", "--prefix=rl/", "-u", tree)
+        git(target, "commit", "-q", "-m", "lean import")
+        for p in dropped:  # the second commit adds the files the lean selection left out, byte for byte
+            dest = os.path.join(target, "rl", *p.split("/"))
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest, "wb") as f:
+                f.write(subprocess.check_output(["git", "-C", self.runrepo, "show", "%s:%s" % (self.f, p)]))
+        git(target, "add", "-A")
+        git(target, "commit", "-q", "-m", "the rest")
+        c1, c2 = git(target, "rev-parse", "HEAD~1"), git(target, "rev-parse", "HEAD")
+
+        def check(*extra):
+            r = subprocess.run([sys.executable, "-I", CHECK, "--run-repo", self.runrepo, "--ref", self.f, "--repo", target,
+                                "--import-commit", c1, "--import-commit", c2, "--scan-commit", "HEAD",
+                                "--dropped-list", empty] + list(extra),
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            return r.returncode, r.stdout.decode()
+        rc, text = check()
+        self.assertEqual(rc, 0, text)
+        self.assertIn("kept %d + dropped 0" % len(res), text)
+        self.assertIn("(f) imported paths that differ from F at the scan commit: 0", text)
+        # an imported file edited afterwards (a hedged sentence in a README) is reported, unless it is named as allowed
+        with open(os.path.join(target, "rl", *(S + "README.md").split("/")), "ab") as f:
+            f.write(b"edited\n")
+        git(target, "add", "-A")
+        git(target, "commit", "-q", "-m", "edit")
+        rc, text = check()
+        self.assertEqual(rc, 1, text)
+        self.assertIn(S + "README.md", text)
+        rc, text = check("--allow-changed", S + "README.md")
+        self.assertEqual(rc, 0, text)
 
 
 if __name__ == "__main__":

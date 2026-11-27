@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Checks of the lean import of the former run repository (see select_import.py).
 
-  python check_import.py --run-repo RUN --ref F --repo FORKCHECKOUT --import-commit C --dropped-list FILE
+  python check_import.py --run-repo RUN --ref F --repo FORKCHECKOUT --import-commit C [--import-commit C3]
+                         --dropped-list FILE [--scan-commit HEAD] [--allow-changed PATH ...]
+
+The import now has two commits that add files under rl/ (the first one, then the one that adds the files the lean
+selection had left out); the dropped list is then empty. (f) reports imported files that differ from F at the scan commit.
 
 (a) every imported path has the same blob id under rl/ at C as in F;
 (b) kept + dropped = all paths of F, with no overlap (kept = the paths imported at C);
@@ -80,7 +84,10 @@ def main():
     ap.add_argument("--run-repo", required=True)
     ap.add_argument("--ref", required=True)
     ap.add_argument("--repo", required=True)
-    ap.add_argument("--import-commit", required=True)
+    ap.add_argument("--import-commit", required=True, action="append",
+                    help="a commit that adds imported files under rl/ (repeat for a second one)")
+    ap.add_argument("--allow-changed", action="append", default=[],
+                    help="a path relative to rl/ that is meant to differ from F at the scan commit (repeat)")
     ap.add_argument("--dropped-list", required=True)
     ap.add_argument("--show-hits", type=int, default=40)
     ap.add_argument("--scan-commit", help="commit whose files check (d) reads (default: the import commit)")
@@ -89,16 +96,17 @@ def main():
 
     f = ls(a.run_repo, a.ref)
     # the files the import commit added under rl/ (the first parent has no rl/ import)
-    parent = a.import_commit + "~1"
-    added = git(a.repo, "diff-tree", "-r", "--name-only", "--no-commit-id", "-z", parent, a.import_commit).split(b"\0")
     imp = {}
-    after = ls(a.repo, a.import_commit, "rl")
-    for raw in added:
-        if not raw:
-            continue
-        p = raw.decode("utf-8", "surrogateescape")
-        assert p.startswith("rl/"), p
-        imp[p[3:]] = after[p]
+    for commit in a.import_commit:
+        added = git(a.repo, "diff-tree", "-r", "--name-only", "--diff-filter=A", "--no-commit-id", "-z",
+                    commit + "~1", commit).split(b"\0")
+        after = ls(a.repo, commit, "rl")
+        for raw in added:
+            if not raw:
+                continue
+            p = raw.decode("utf-8", "surrogateescape")
+            assert p.startswith("rl/"), p
+            imp[p[3:]] = after[p]
     dropped = [l for l in open(a.dropped_list, "rb").read().decode("utf-8").split("\n") if l]
 
     # (a)
@@ -121,7 +129,15 @@ def main():
 
     # (d)
     # the files are read at --scan-commit (default: the import commit), so that edits of commit 2 are scanned too
-    scan = ls(a.repo, a.scan_commit or a.import_commit, "rl")
+    scan = ls(a.repo, a.scan_commit or a.import_commit[-1], "rl")
+    # (f) an imported path whose blob at the scan commit is not the blob of F (apart from the named exceptions)
+    changed = sorted(p for p in imp if "rl/" + p in scan and scan["rl/" + p][0] != f[p][0])
+    unexpected = [p for p in changed if p not in a.allow_changed]
+    print("(f) imported paths that differ from F at the scan commit: %d (allowed %d, unexpected %d)"
+          % (len(changed), len(changed) - len(unexpected), len(unexpected)))
+    for p in unexpected:
+        print("    %s" % p)
+    bad += len(unexpected)
     want = [p for p in imp if "rl/" + p in scan]
     gone = [p for p in imp if "rl/" + p not in scan]
     if gone:

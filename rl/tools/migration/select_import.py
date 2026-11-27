@@ -9,7 +9,16 @@ Rule, mechanical and by file type, under data/ only:
 "Referenced" means that one of these forms of the file's path occurs in one of the text sources:
   repo-path   the repository-relative path, e.g. data/<session>/dir/x.sh
   session-path the path relative to its session folder, e.g. dir/x.sh (or x.sh at the folder root)
-  dir         the directory that contains the file (repository-relative, or relative to its session folder)
+  dir         the directory that contains the file (repository-relative, or relative to its session folder).
+              A multi-part folder path counts with or without a trailing slash. A one-word folder name counts only
+              when it is written with its slash AND it is the file's parent relative to the session folder
+              ("serving/" for serving/x.log). A leaf folder at a deeper level ("driver_logs/" for
+              serving/driver_logs/x.log, "scripts/" for host_step/scripts/x.py) is NOT a reference: its parent
+              relative to the session is the multi-part path "serving/driver_logs", which must be written in full.
+              Brace, glob and <placeholder> forms ("i34_{a,b}.out", "logs/*.out", "<container>.launch.out") are not
+              expanded. These gaps are why the lean selection dropped files that kept text names (about 104 of 145);
+              the import was therefore made complete (all 145 files are under rl/) and this script is kept as the
+              record of the rule, not as the way the import is chosen.
   basename    the base name, when that base name is unique among all paths of F
 Text sources:
   run   README.md, REPRODUCE.md, docs/**, every data/**/README.md, every data/**/tables.txt of F, and (one choice
@@ -18,7 +27,7 @@ Text sources:
         and every imported script (.py or .sh): all scripts outside data/, plus the scripts under data/ that
         are kept because they are referenced (the scan repeats until nothing new is kept)
   fork  README.md and docs/rl/** of the fork at --fork-ref
-  hub   ledger/**, lessons/**, reference/** and the top-level .md files of the hub at --hub-ref
+  hub   ledger/**, lessons/**, reference/**, analysis/** and the top-level .md files of the hub at --hub-ref
         (private text: the reason column names only "hub", never a hub file)
 
 Usage:
@@ -191,7 +200,7 @@ def main():
     for p in fork_paths:
         sources.append(("fork", p, text_of(fb[fork_tree[p]])))
     hub_tree = ls_tree(a.hub_repo, a.hub_ref)
-    hub_paths = sorted(p for p in hub_tree if p.startswith(("ledger/", "lessons/", "reference/"))
+    hub_paths = sorted(p for p in hub_tree if p.startswith(("ledger/", "lessons/", "reference/", "analysis/"))
                        or ("/" not in p and p.endswith(".md")))
     hb = read_blobs(a.hub_repo, [hub_tree[p] for p in hub_paths])
     for p in hub_paths:

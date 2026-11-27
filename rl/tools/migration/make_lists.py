@@ -17,7 +17,7 @@ import subprocess
 import sys
 
 NOT_IMPORTED_HEADER = "# path in the former run repository (rl/<path> here would be the same file)\tgit blob id\tsha256\tsize (bytes)\n"
-SKIP_LEGACY = ("rl/data/LEGACY.sha256", "rl/data/NOT_IMPORTED.tsv", "rl/data/README.md")
+SKIP_LEGACY = ("rl/data/LEGACY.sha256",)
 
 
 def git(repo, *args, stdin=None):
