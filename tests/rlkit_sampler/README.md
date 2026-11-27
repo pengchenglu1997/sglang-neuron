@@ -320,11 +320,11 @@ cannot read the checkout, the copy in the tests folder is used.
 
 Hardware scripts, `tests/rlkit_sampler/hardware/`: `82_sampler_kernel_hw.py` (three servers: released temperature,
 kernel, released greedy; checks and benchmarks; Qwen3-0.6B), `83_sampler_check2.py` (the second correctness check, with
-controls), `84_sampler_kernel_8b.py` (the same as 82 on Qwen3-8B), `85_sampler_topk_hw.py` (the `topk_topp` path, not run yet; it
-imports 82 and mounts `patches/sglang_neuron_v0.1.0_sampler_kernel_topk/` holding `sampling.py`,
-`rlkit_sampler_kernel.py` and `rlkit_sampler_topk.py`). They are not self-contained. They import the launcher
-kit of the team tooling (`81_opt_sweep.py`, `server_ctl.py`, `rl_common.py`, `rollout_client.py`, `backends.json`, `srv_sglang_neuron.sh`,
-`22b_llmbench_grid.sh`, and the scripts these call). The hardware scripts used for the runs are team tooling kept outside the engine tree and are
+controls), `84_sampler_kernel_8b.py` (the same as 82 on Qwen3-8B), `85_sampler_topk_hw.py` (the `topk_topp` path, not run
+yet; it imports 82 and mounts `patches/sglang_neuron_v0.1.0_sampler_kernel_topk/` holding `sampling.py`,
+`rlkit_sampler_kernel.py` and `rlkit_sampler_topk.py`). They are not self-contained. They import the launcher kit of the
+team tooling (`81_opt_sweep.py`, `server_ctl.py`, `rl_common.py`, `rollout_client.py`, `backends.json`,
+`srv_sglang_neuron.sh`, `22b_llmbench_grid.sh`, and the scripts these call), which is kept outside the engine tree and is
 not copied here. Put them in that kit's folder, with the two
 changed package files under `patches/sglang_neuron_v0.1.0_sampler_kernel/` (`sampling.py`, `rlkit_sampler_kernel.py`,
 the paths relative to `sglang_neuron/`); `82_sampler_kernel_hw.py` mounts that folder over the installed package.
