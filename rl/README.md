@@ -43,7 +43,7 @@ Corrections to frozen session READMEs (the file stays byte-identical; the correc
 | `python rl/tools/best.py` | the headline numbers with tier and baseline; `--check` reads every file |
 | `python rl/tools/switches.py` | the environment variables this fork's engine changes add, read from the code |
 | `bash rl/tools/fork_state.sh` | branches, open pull requests, our upstream pull requests and issues, what main has that integration lacks |
-| `bash rl/tools/upstream_ready.sh <branch>` | whether a branch carries only engine paths and its CPU tests pass (exit 3: no test found; exit 2 "cannot run tests": a missing module) |
+| `bash rl/tools/upstream_ready.sh <branch>` | whether a branch carries only engine paths and its CPU tests pass; "no test found" and "cannot run tests" (a missing module) have exit statuses of their own (its header) |
 | `rl/tools/selftest_template.py` | the CPU selftest a change for upstream copies to `tests/<area>/selftest_<topic>.py` |
 | `python rl/tools/rewrite_links.py` | the links that still point into the former run repository (dry run) |
 | `python rl/tools/migration/numbers_moved.py --base origin/main` | every numeral a documentation change removed from `README.md` and `docs/rl/`, and the line of `rl/` that holds it now |
