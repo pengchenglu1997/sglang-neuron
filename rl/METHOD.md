@@ -9,6 +9,7 @@ headline ones are listed with their tier in [`best.tsv`](best.tsv) (`python rl/t
 - **`paired(n)`**: n interleaved server-start pairs of baseline and candidate, after 1 discarded warm-up pair; the verdict
   is the median of the per-pair percent deltas. If the signs of the pairs disagree there is no verdict. A series that
   drifts in one direction has not converged: repeat. n = 7 is proposed (VibeSys default), until our A/A run sets it.
+- **`once`**: one pass or one start. A record, not a claim; it is written in prose and is not a row of `best.tsv`.
 - **What a claim may rest on.** "Faster" or "slower" by X percent may rest on `screen` only when |X| is 10 or more; the 10
   is provisional and is replaced by 5 times the start-to-start spread of the first public A/A run (the unchanged code
   against itself, in pairs). The tier is written next to the number. A smaller difference, and every "no difference" or

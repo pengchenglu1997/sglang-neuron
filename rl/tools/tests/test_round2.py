@@ -290,16 +290,20 @@ class WorkflowHardening(unittest.TestCase):
         self.assertIn("require review from Code Owners", t)
 
     @unittest.skipUnless(HAVE_BASH, "bash is needed")
-    def test_report_job_stops_when_git_diff_fails(self):
+    def test_checks_job_stops_when_git_diff_fails(self):
         r = helpers.Repo()
         rt = tempfile.mkdtemp(prefix="rtemp_")
         try:
             shutil.copytree(TOOLS, os.path.join(r.dir, "rl", "tools"), ignore=shutil.ignore_patterns("tests", "__pycache__"))
             r.write("README.md", "r\n")
+            r.write("rl/best.tsv", "key\tlabel\tmodel\tfile\tselector\tbaseline\ttier\n")
+            r.write("docs/rl/RESULTS.md", "r\n")   # F5 reads both documents; rl/data must exist for the tables check
+            r.write("rl/data/note.txt", "n\n")
             good = r.commit("c")
-            script = os.path.join(rt, "report.sh")
+            r.git("update-ref", "refs/remotes/origin/upstream-main", good)
+            script = os.path.join(rt, "checks.sh")
             with open(script, "w", newline="\n") as fh:
-                fh.write(block("Report-mode checks (printed, never failing)"))
+                fh.write(block("Team checks F2-F8 and F10 (any failing check fails the job)"))
             env = {"RUNNER_TEMP": rt, "LABELS_JSON": "[]", "PR_BODY": "", "BASE_REF": "main", "BASE_SHA": "0" * 40, "HEAD_SHA": good, "MAIN_SHA": good}
             code, out, err = run(["bash", script], r.dir, env=env)
             self.assertNotEqual(code, 0, out + err)
@@ -307,6 +311,33 @@ class WorkflowHardening(unittest.TestCase):
             env["BASE_SHA"] = good
             code, out, err = run(["bash", script], r.dir, env=env)
             self.assertEqual(code, 0, out + err)
+        finally:
+            r.close()
+            shutil.rmtree(rt, ignore_errors=True)
+
+    @unittest.skipUnless(HAVE_BASH, "bash is needed")
+    def test_a_failing_check_fails_the_job_and_the_others_still_run(self):
+        # F8 (state wording on an added line) used to be report mode; now the job fails, and F10 still runs after it.
+        r = helpers.Repo()
+        rt = tempfile.mkdtemp(prefix="rtemp_")
+        try:
+            shutil.copytree(TOOLS, os.path.join(r.dir, "rl", "tools"), ignore=shutil.ignore_patterns("tests", "__pycache__"))
+            r.write("README.md", "r\n")
+            r.write("rl/best.tsv", "key\tlabel\tmodel\tfile\tselector\tbaseline\ttier\n")
+            r.write("docs/rl/RESULTS.md", "r\n")
+            r.write("rl/data/note.txt", "n\n")
+            base = r.commit("c")
+            r.git("update-ref", "refs/remotes/origin/upstream-main", base)
+            r.write("README.md", "r\nThe branch is currently open.\n")
+            head = r.commit("d")
+            script = os.path.join(rt, "checks.sh")
+            with open(script, "w", newline="\n") as fh:
+                fh.write(block("Team checks F2-F8 and F10 (any failing check fails the job)"))
+            env = {"RUNNER_TEMP": rt, "LABELS_JSON": "[]", "PR_BODY": "", "BASE_REF": "main", "BASE_SHA": base, "HEAD_SHA": head, "MAIN_SHA": base}
+            code, out, err = run(["bash", script], r.dir, env=env)
+            self.assertNotEqual(code, 0, out + err)
+            self.assertIn("F8 state wording on added lines failed", out + err)
+            self.assertIn("F10 engine files do not mention rl/ and symlinks: ok", out + err)
         finally:
             r.close()
             shutil.rmtree(rt, ignore_errors=True)
