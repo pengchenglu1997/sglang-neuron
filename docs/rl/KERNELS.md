@@ -509,3 +509,7 @@ Reading, with limits:
 - Per-operation attribution needs the raw profile files. They are not in this fork or the public repo (size); the record gives their
   checksums.
 - One run each, one model size, one tensor-parallel layout. None of this is a statement about 8B or about 27-32B.
+- Added 2026-11-26: the LM head's weight layout is now a switch on `main`, `SGLANG_NEURON_LM_HEAD_PRETRANSPOSED=1`
+  (no kernel of its own; [RESULTS.md](RESULTS.md) section 9 has its trn2 speed and correctness rows). Device profiles
+  of those servers were captured but not analysed, so this table has no row for it and whether the per-step transpose
+  of the vocabulary shard is gone is not read from a profile.
