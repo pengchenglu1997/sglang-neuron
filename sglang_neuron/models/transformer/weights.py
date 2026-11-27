@@ -59,3 +59,10 @@ def vocab_rows_loader(rows: int, hidden_size: int) -> SafetensorsWeightLoader:
     """A vocabulary-sharded [V, H] table (the embedding, the LM head): this rank's rows, the last shard padded."""
     return SafetensorsWeightLoader(transform=lambda slices, rank: pad_to_shape(
         slices[0][rank * rows:(rank + 1) * rows], (rows, hidden_size)))
+
+
+def vocab_columns_loader(rows: int, hidden_size: int) -> SafetensorsWeightLoader:
+    """The same vocabulary shard as ``vocab_rows_loader``, stored as [H, rows] (the LM head's own copy, in the layout its
+    matmul reads)."""
+    rows_loader = vocab_rows_loader(rows, hidden_size)
+    return SafetensorsWeightLoader(transform=lambda slices, rank: rows_loader.transform(slices, rank).t())
