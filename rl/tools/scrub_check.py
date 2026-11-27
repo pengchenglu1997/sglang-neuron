@@ -114,7 +114,10 @@ def iter_files(paths):
 
 
 def rel_name(p):
-    rel = os.path.relpath(p, ".")
+    try:
+        rel = os.path.relpath(p, ".")
+    except ValueError:      # Windows: the file is on another drive than the current folder
+        rel = os.path.abspath(p)
     return rel.replace("\\", "/") if os.sep == "\\" else rel
 
 

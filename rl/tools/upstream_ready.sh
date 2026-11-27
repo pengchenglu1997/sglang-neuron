@@ -11,7 +11,8 @@
 #    tests are NOT CHECKED and the branch is not called READY (exit 3): the change brings its own selftest (template:
 #    rl/tools/selftest_template.py), or the human records the manual check instead. --skip-tests: not run, and the last
 #    line says so. A test that stops on a missing Python module (torch, pytest, ...) is not a failing test: the script
-#    prints "cannot run tests: needs <module>" and exits 2. The CPU tests need Python 3.11+ with torch (CPU build),
+#    prints "cannot run tests: needs <module>" and exits 2, unless the module is a file or folder of the branch itself
+#    (then the test failed: exit 1). A selftest that still holds the template marker line is NOT READY. The CPU tests need Python 3.11+ with torch (CPU build),
 #    safetensors and pytest (AGENTS.md section 0).
 # Exit status: 0 ready; 1 not ready (a TEAM path, or a test that failed); 2 bad input, a failed tool, or cannot run
 # tests (a missing module); 3 TEAM paths clean but no CPU test found.
@@ -79,8 +80,14 @@ run_test() {
     cat "$tmp/out"; echo "ok: $label passes"; return
   fi
   cat "$tmp/out"
-  mods="$(grep -oE "No module named '[^']+'" "$tmp/out" | sed -E "s/^No module named '([^'.]+).*/\1/" | sort -u | tr '\n' ' ')"
-  if [ -n "$mods" ]; then
+  all="$(grep -oE "No module named '[^']+'" "$tmp/out" | sed -E "s/^No module named '([^'.]+).*/\1/" | sort -u | tr '\n' ' ')"
+  # A module whose top-level name is a file or a folder of the branch is the branch's own code: a failing test.
+  mods=""; own=""
+  for m in $all; do
+    if [ -e "$tmp/wt/$m" ] || [ -e "$tmp/wt/$m.py" ]; then own="$own $m"; else mods="$mods $m"; fi
+  done
+  mods="${mods# }"
+  if [ -n "$mods" ] && [ -z "$own" ]; then
     echo "cannot run tests: $label needs ${mods% } (a missing Python module, not a failing test)"
     missing="$missing $mods"
   else
@@ -110,6 +117,11 @@ elif [ "$status" -eq 0 ]; then
     while IFS= read -r f; do
       [ -n "$f" ] || continue
       tests_ran=1
+      if grep -q 'SELFTEST_TEMPLATE_UNCHANGED' "$tmp/wt/$f"; then
+        echo "NOT READY: $f is still the template (delete its header with the marker line, replace the placeholder check)"
+        status=1
+        continue
+      fi
       run_test "$f" "$PY" "$f"
     done < "$tmp/selftests.txt"
   else

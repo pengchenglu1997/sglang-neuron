@@ -14,8 +14,8 @@ git remote add mine https://github.com/<you>/sglang-neuron.git; git config user.
 git fetch --multiple origin upstream && bash rl/tools/fork_state.sh     # branches, pull requests, our upstream pull requests, mirror
 ```
 If the two logins of the first line are the same, you act as the lead: GitHub rejects none of your pushes, so every push, pull request
-and upstream action still waits for the lead's yes typed in this session. `.claude/settings.json` makes `git push`, `gh pr create`,
-writes to `sgl-project/*` and cloud launches ask the human first; that prompt is not the yes. CPU tests (`tests/cpu`,
+and upstream action still waits for the lead's yes typed in this session. `.claude/settings.json` asks the human before `git push`, `gh pr create`,
+gh writes upstream and cloud launches; it covers the usual forms only and is not a boundary (aliases, scripts and other tools pass); the prompt is not the yes. CPU tests (`tests/cpu`,
 `tests/**/selftest_*.py`) need Python 3.11+ with torch (CPU build), safetensors and pytest; installing them is a download: ask first.
 State is read, never written here. A command and a document that disagree: on a fact the command wins; on a permission the stricter applies.
 
@@ -50,7 +50,7 @@ and merges with a merge commit. Name the label you ask for in the body; never pa
 ## 4 Upstream
 - A branch for upstream starts from `origin/upstream-main`, keeps its `feat/` or `fix/` name, and changes engine paths only.
   `bash rl/tools/upstream_ready.sh <branch>` must print READY. The mirror has no tests, so the change brings its own CPU selftest:
-  copy `rl/tools/selftest_template.py` to `tests/<area>/selftest_<topic>.py`. Without one the script exits 3 (not READY) and the
+  copy `rl/tools/selftest_template.py` to `tests/<area>/selftest_<topic>.py`, delete its header, replace its failing placeholder check. Without one the script exits 3 (not READY) and the
   human records the manual check in the upstream decision instead. Exit 2 "cannot run tests: needs <module>" is a missing
   dependency (section 0), not a failing test. The same head is merged into `main` and sent upstream; never cherry-pick it to another name.
 - Evidence links in an upstream text: `https://github.com/pengchenglu1997/sglang-neuron/tree/<sha>/rl/data/...`. `gh pr create`

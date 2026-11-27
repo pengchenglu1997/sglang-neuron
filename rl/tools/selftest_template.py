@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""Template of a CPU selftest that a change for upstream brings with it (AGENTS.md section 4).
+# --- template header: delete it in the copy, from this line to the line "end of template header" ---
+# Template of the CPU selftest that a change for upstream brings with it (AGENTS.md section 4). Copy it to
+# tests/<area>/selftest_<topic>.py on the branch cut from origin/upstream-main, delete this header, set MODULE, write the
+# docstring, and replace the placeholder check with one that fails on the code before the change and passes after it.
+# upstream_ready.sh runs every tests/**/selftest_*.py as "python <script>" from the top of the branch (exit 0 is a pass)
+# and calls a branch NOT READY while a selftest still holds the marker line below. Unchanged, the placeholder fails.
+# The copy travels upstream: no path, name or folder of the team tooling in it (check F10 fails such an engine file).
+# SELFTEST_TEMPLATE_UNCHANGED
+# --- end of template header ---
+"""CPU selftest of <the change>: <the behaviour it checks>.
 
-Copy it to tests/<area>/selftest_<topic>.py on the branch cut from origin/upstream-main, then replace the check below
-with one that fails on the code before the change and passes after it. upstream_ready.sh runs every
-tests/**/selftest_*.py as "python <script>" from the top of the branch: exit status 0 is a pass, anything else a failure.
-
-Rules for the copy (it travels upstream):
-  - the standard library only, unless the module under test itself needs more (then say so in the docstring);
-  - load the changed file by its path, so that importing the package (and its device dependencies) is not needed;
-  - no path, name or folder of the team tooling of this fork: the copy is an engine file, and check F10 fails an engine
-    file that mentions that folder.
+Standard library only (if the module under test needs more, say so here). It loads the changed file by its path, so
+importing the package and its device dependencies is not needed.
 """
 import importlib.util
 import os
@@ -34,8 +36,8 @@ def main():
         if not cond:
             failures.append(what)
 
-    # replace: one check per behaviour the change adds or fixes
-    check(os.path.isfile(MODULE), "the file under test exists: %s" % os.path.relpath(MODULE, TOP))
+    # replace: one check per behaviour the change adds or fixes, e.g. check(load(MODULE).f(2) == 4, "f doubles")
+    check(False, "placeholder: replace this check with one that tests the change")
     print("%d check(s) failed" % len(failures))
     return 1 if failures else 0
 

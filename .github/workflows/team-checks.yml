@@ -23,7 +23,8 @@ name: team-checks
 #           code, while integration adds switches. Green once integration's switches equal main's, or once the block
 #           names a branch per row for integration.
 #         F10: two engine files of integration mention rl/ (sglang_neuron/rlkit_sampler_topk.py, tests/rlkit_sampler/README.md).
-#           Green once a cpu-only engine pull request into integration removes those mentions.
+#           Green once a cpu-only engine pull request into integration removes those mentions. A mention or symlink
+#           that the base does not already have still fails on integration (check_docs.py f10 --base).
 #       F3 scrubs every changed file that still exists (engine files too), with rl/tools/scrub_allow.txt.
 # F5 (generated blocks) runs best.py, switches.py and check_tables.py in that job. A document without the markers is
 # reported as not checked and passes; rl/tools/tests/test_docs_pr.py (F9) requires the markers in README.md and RESULTS.md.
@@ -195,6 +196,10 @@ jobs:
           step "F6 data folders" python $T/check_data.py --base "$BASE_SHA" --head "$HEAD_SHA"
           step "F7 links and paths" python $T/check_docs.py f7 --base "$BASE_SHA"
           step "F8 state wording on added lines" python $T/check_docs.py f8 --base "$BASE_SHA" --head "$HEAD_SHA"
+          # On integration a mention or symlink that the base does not already have fails; only the known ones are reported.
+          if [ "$BASE_REF" = integration ]; then
+            step "F10 no new rl/ mention or symlink against the base" python $T/check_docs.py f10 --base "$BASE_SHA"
+          fi
           integration_report "F10 engine files do not mention rl/ and symlinks" python $T/check_docs.py f10
           # Every other check fails the job on every base.
           exit "$fail"

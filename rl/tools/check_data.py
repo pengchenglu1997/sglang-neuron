@@ -51,13 +51,9 @@ def sha(data):
 SERVED = re.compile(r"^\s*(?:[-*]\s+)?Served:\s*(.*?)\s*$")
 
 
-def served_line(readme):
-    """The text after 'Served:' on the first such line of a session README (optionally a list item), or None."""
-    for line in readme.decode("utf-8", "replace").splitlines():
-        mo = SERVED.match(line)
-        if mo:
-            return mo.group(1)
-    return None
+def served_lines(readme):
+    """The text after 'Served:' on every such line of a session README (optionally a list item); [] when none."""
+    return [mo.group(1) for mo in map(SERVED.match, readme.decode("utf-8", "replace").splitlines()) if mo]
 
 
 def check(base, head, repo="."):
@@ -128,7 +124,9 @@ def check(base, head, repo="."):
             for rel in sorted(set(names) - listed - {"SHA256SUMS"}):
                 bad("F6: %s%s is not listed in SHA256SUMS." % (pre, rel))
         if "README.md" in names:
-            served = served_line(common.show(head, pre + "README.md", cwd=repo) or b"")
+            lines = served_lines(common.show(head, pre + "README.md", cwd=repo) or b"")
+            # Every Served: line counts: one that names a commit makes the folder one that served an engine patch.
+            served = next((s for s in lines if s.lower() != "none"), "none") if lines else None
             if served is None:
                 bad("F6: %sREADME.md has no 'Served:' line; write 'Served: <fork commit>[, <commit> ...]' (the engine "
                     "patches its servers ran) or 'Served: none'." % pre)

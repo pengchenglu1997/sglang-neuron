@@ -87,14 +87,24 @@ class ChecksJobOnEveryBase(unittest.TestCase):
         self.assertNotEqual(code, 0, out)
         self.assertIn("F3 scrub of every changed file failed", out)
 
-    def test_f10_is_report_mode_on_integration_and_fails_on_main(self):
+    def test_f10_known_mention_is_report_mode_on_integration_and_fails_on_main(self):
         self.r.write("sglang_neuron/e.py", "e = 0  # see rl/README.md\n")
+        self.base = self.r.commit("base with a known mention")
+        self.r.write("sglang_neuron/f.py", "f = 1\n")
         code, out = self.job("integration", '["cpu-only"]')
         self.assertEqual(code, 0, out)
         self.assertIn("report mode for base integration only", out)
+        self.assertIn("F10 no new rl/ mention or symlink against the base: ok", out)
         code, out = self.job("main", '["hardware-verified"]')
         self.assertNotEqual(code, 0, out)
         self.assertIn("F10 engine files do not mention rl/ and symlinks failed", out)
+
+    def test_f10_new_mention_fails_on_integration(self):
+        self.r.write("sglang_neuron/new.py", "from rl.tools import common\n")
+        code, out = self.job("integration", '["cpu-only"]')
+        self.assertNotEqual(code, 0, out)
+        self.assertIn("F10 no new rl/ mention or symlink against the base failed", out)
+        self.assertIn("sglang_neuron/new.py:1", out)
 
     def test_f8_fails_on_integration(self):
         self.r.write("docs/rl/RESULTS.md", "r\nThe lm_head switch has no effect on Qwen3-8B.\n")
@@ -128,14 +138,18 @@ class F8NullClaims(unittest.TestCase):
 
     def test_each_phrase_needs_paired_n(self):
         for line in ("The lm_head switch has no effect on Qwen3-8B.", "No difference at concurrency 32.",
-                     "The kernel shows no change in latency.", "There were no differences."):
+                     "The kernel shows no change in latency.", "There were no differences.",
+                     # up to two words between 'no' and the noun, and the literal paired(n) is not a count
+                     "It made no measurable difference at concurrency 32.", "It had no real effect on Qwen3-8B.",
+                     "It shows no statistically significant change.", "It has no difference (paired(n))."):
             ok, msgs = self.f8(line)
             self.assertFalse(ok, line)
             self.assertIn("needs paired(n)", msgs[0])
 
     def test_paired_on_the_same_line_passes(self):
         for line in ("No difference at paired(7): median delta inside the A/A spread.",
-                     "no change at `paired(n)` with n = 7 (paired(n))"):
+                     "no change at `paired(n)` with n = 7 (paired(7))",
+                     "It made no measurable difference at concurrency 32, paired(12)."):
             ok, msgs = self.f8(line)
             self.assertTrue(ok, (line, msgs))
 
@@ -171,6 +185,13 @@ class F6Served(unittest.TestCase):
         ok, msgs = self.folder("# s\nServed: fork 9857f66\n")
         self.assertFalse(ok)
         self.assertTrue(any("served an engine patch" in m for m in msgs), msgs)
+
+    def test_a_later_served_line_with_a_commit_needs_the_manifest(self):
+        ok, msgs = self.folder("# s\n- Served: none\n- Served: fork 9857f66\n")
+        self.assertFalse(ok)
+        self.assertTrue(any("Served: fork 9857f66" in m and "served an engine patch" in m for m in msgs), msgs)
+        ok, msgs = self.folder("# s\n- Served: none\n- Served: fork 9857f66\n", manifest=True)
+        self.assertTrue(ok, msgs)
 
     def test_served_commit_with_manifest_passes(self):
         ok, msgs = self.folder("# s\n- Served: fork 9857f66, fork 897d927\n", manifest=True)
@@ -268,21 +289,56 @@ class UpstreamReadyTests(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("NOT READY: tests/x/selftest_fails.py failed", out)
 
-    def test_the_template_copied_into_tests_makes_the_branch_ready(self):
-        with open(os.path.join(TOOLS, "selftest_template.py"), "rb") as fh:
-            self.r.write("tests/x/selftest_a.py", fh.read())
+    def template(self):
+        with open(os.path.join(TOOLS, "selftest_template.py"), encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_an_unchanged_copy_of_the_template_is_not_ready(self):
+        self.r.write("tests/x/selftest_a.py", self.template())
+        self.r.write("sglang_neuron/env_registry.py", "X = 1\n")
+        code, out = self.run_sh()
+        self.assertEqual(code, 1, out)
+        self.assertIn("is still the template", out)
+        self.assertNotIn("READY: up/x", out.replace("NOT READY", ""))
+
+    def test_a_copy_without_the_header_but_with_the_placeholder_fails(self):
+        t = self.template()
+        t = t[:t.index("# --- template header")] + t[t.index("# --- end of template header ---\n") + 33:]
+        self.assertNotIn("SELFTEST_TEMPLATE_UNCHANGED", t)
+        self.r.write("tests/x/selftest_a.py", t)
+        code, out = self.run_sh()
+        self.assertEqual(code, 1, out)
+        self.assertIn("NOT READY: tests/x/selftest_a.py failed", out)
+
+    def test_a_filled_in_copy_makes_the_branch_ready(self):
+        t = self.template()
+        t = t[:t.index("# --- template header")] + t[t.index("# --- end of template header ---\n") + 33:]
+        t = t.replace('check(False, "placeholder: replace this check with one that tests the change")',
+                      'check(load(MODULE).X == 1, "X is 1")')
+        self.r.write("tests/x/selftest_a.py", t)
         self.r.write("sglang_neuron/env_registry.py", "X = 1\n")
         code, out = self.run_sh()
         self.assertEqual(code, 0, out)
         self.assertIn("READY: up/x", out)
 
+    def test_a_missing_module_of_the_branch_itself_is_a_failing_test(self):
+        self.r.write("tests/x/selftest_own.py", "import sglang_neuron.no_such_module\n")
+        code, out = self.run_sh()
+        self.assertEqual(code, 1, out)
+        self.assertIn("NOT READY: tests/x/selftest_own.py failed", out)
+        self.assertNotIn("cannot run tests", out)
+
 
 class SelftestTemplate(unittest.TestCase):
-    def test_runs_and_names_no_team_folder(self):
+    def test_names_no_team_folder_outside_the_header_and_fails_unchanged(self):
         text = read("rl/tools/selftest_template.py")
         self.assertIsNone(re.search(r"(?<![A-Za-z0-9_.])rl/", text))     # check F10 once it is copied under tests/
+        body = text[text.index("# --- end of template header ---"):]
+        for word in ("AGENTS", "upstream_ready", "fork", "team"):
+            self.assertNotIn(word, body)
         p = subprocess.run([sys.executable, os.path.join(TOOLS, "selftest_template.py")], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertIn(b"placeholder", p.stdout)
 
 
 class ClaudeSettingsAndHook(unittest.TestCase):
@@ -325,6 +381,41 @@ class ClaudeSettingsAndHook(unittest.TestCase):
         for cmd in ("gh pr view 25 -R sgl-project/sglang-neuron", "gh api repos/sgl-project/sglang-neuron/pulls/25",
                     "git status", "git log --grep push", "aws ec2 describe-instances", "python rl/tools/best.py"):
             self.assertIsNone(decide(cmd), cmd)
+        self.decide = decide
+
+    @unittest.skipUnless(HAVE_BASH, "bash is needed")
+    def test_hook_review_bypasses_are_asked(self):
+        self.test_hook_asks_for_writes_upstream_pushes_and_launches_only()
+        decide = self.decide
+        for cmd in (
+                # a newline in the command is the two characters backslash n in the JSON text
+                "echo a\ngh pr comment 5 -R sgl-project/sglang-neuron --body x",
+                "echo a\ngh api -X POST repos/sgl-project/sglang-neuron/issues/1/comments",
+                "cd /x\ngit -C . push mine x", "cd /x\r\n\tgit push mine x",
+                # characters right after push
+                "git -C . push;echo", "git -C /x push&&echo ok", "git -C . push)", "git -C .\tpush\tmine",
+                # option forms of git
+                'git -C "/tmp/my dir" push mine x', "git -C 'my dir' push mine x", "git --git-dir .git push mine x",
+                "git --work-tree=/w --git-dir=/w/.git push mine x", "git -c user.name=x -C . push",
+                # gh writes that never name sgl-project (the default repository of a clone of the fork is upstream)
+                "gh pr comment 12 --body hi", "gh issue create -t x -b y", "gh pr edit 3 --title t", "gh pr ready 3",
+                "gh pr merge 3", "gh pr new --fill", "gh issue new -t x", "gh label create x",
+                "gh api repos/{owner}/{repo}/issues/1/comments -f body=hi",
+                "gh api repos/sgl-project/sglang-neuron/issues/1/comments --raw-field=body=hi",
+                "gh api repos/sgl-project/sglang-neuron/issues/1/comments -fbody=hi",
+                "gh api repos/x/y/issues --input b.json", "gh api -XPOST repos/x/y/issues",
+                "R=sgl; gh pr comment 1 -R ${R}-project/sglang-neuron --body x",
+                "gh pr comment 1 -R pengchenglu1997/sglang-neuron --body x; gh pr comment 2 --body y"):
+            self.assertEqual(decide(cmd), "ask", repr(cmd))
+        for cmd in ("gh pr comment 12 -R pengchenglu1997/sglang-neuron --body hi",
+                    "gh issue create --repo=pengchenglu1997/trainium-rl-hub -t x -b y",
+                    "gh api repos/pengchenglu1997/sglang-neuron/issues/1/comments -f body=hi",
+                    "gh api -X GET repos/sgl-project/sglang-neuron/pulls -f state=open",
+                    "gh pr list", "gh pr checks 3", "gh issue view 4", "git pushd", "echo a\ngit status"):
+            self.assertIsNone(decide(cmd), repr(cmd))
+
+    def test_agents_says_the_prompt_is_not_a_boundary(self):
+        self.assertIn("usual forms only and is not a boundary", read("AGENTS.md"))
 
 
 class LmHeadPatchManifest(unittest.TestCase):
@@ -355,6 +446,47 @@ class LmHeadPatchManifest(unittest.TestCase):
         paths = ["sglang_neuron/env_registry.py", "sglang_neuron/sampling.py"]
         ok, msgs = check_pr.f2(["hardware-verified"], paths, "Evidence: rl/data/2026-11-26_trn2/lm_head/", ran, "HEAD", ROOT)
         self.assertTrue(ok, msgs)
+
+
+class F10AgainstTheBase(unittest.TestCase):
+    def setUp(self):
+        self.r = helpers.Repo()
+        self.r.write("rl/README.md", "x\n")
+        self.r.write("sglang_neuron/old.py", "a = 1  # rl/README.md\n")
+        self.base = self.r.commit("base")
+
+    def tearDown(self):
+        self.r.close()
+
+    def test_known_mention_passes_and_new_lines_or_files_fail(self):
+        ok, msgs = check_docs.f10(self.r.dir, self.base)
+        self.assertTrue(ok, msgs)
+        self.assertFalse(check_docs.f10(self.r.dir)[0])
+        self.r.write("sglang_neuron/old.py", "a = 1  # rl/README.md\nimport rl.tools\n")
+        self.r.commit("more")
+        ok, msgs = check_docs.f10(self.r.dir, self.base)
+        self.assertFalse(ok)
+        self.assertIn("sglang_neuron/old.py", msgs[0])
+        self.r.write("sglang_neuron/old.py", "a = 1  # rl/README.md\n")
+        self.r.write("tests/n.py", "# see rl/tools\n")
+        self.r.commit("new file")
+        ok, msgs = check_docs.f10(self.r.dir, self.base)
+        self.assertEqual([m.split(":")[1] for m in msgs], [" tests/n.py"], msgs)
+
+
+class ScrubRelName(unittest.TestCase):
+    def test_a_file_on_another_drive_gives_its_absolute_path(self):
+        import scrub_check
+        real = os.path.relpath
+
+        def other_drive(p, start=None):
+            raise ValueError("path is on mount C:, start on mount F:")
+        os.path.relpath = other_drive
+        try:
+            name = scrub_check.rel_name(os.path.join(tempfile.gettempdir(), "body.txt"))
+        finally:
+            os.path.relpath = real
+        self.assertTrue(os.path.isabs(name), name)
 
 
 class TextFixes(unittest.TestCase):
