@@ -23,6 +23,8 @@ KNOBS: dict = {
     # the device sampler
     "SGLANG_NEURON_SAMPLER": CONFIG,
     "SGLANG_NEURON_MAX_TOP_LOGPROBS": CONFIG,
+    # the dense transformer's LM head as its own [H, V / tp] weight (models/transformer/config.lm_head_pretransposed)
+    "SGLANG_NEURON_LM_HEAD_PRETRANSPOSED": CONFIG,
     # GPT-OSS's expert numeric format (models/gpt_oss/config.expert_format)
     "SGLANG_NEURON_GPT_OSS_EXPERTS": CONFIG,
     # GLM-5.2 (models/glm52): the decode's weight store, the prefill's MTP rows for a drafting decode, the decode
