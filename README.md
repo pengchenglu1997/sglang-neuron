@@ -35,8 +35,7 @@ Open work branches today:
 | `feat/sampler-kernel` | the sampler kernel below, on upstream `main` | merged into `main`; kept because upstream draft pull request [#25](https://github.com/sgl-project/sglang-neuron/pull/25) uses it |
 | `feat/inplace-adapter-sync` | in-place weight update and LoRA adapter sync | ran on trn2 (Qwen3-0.6B and Qwen3-8B). Not in `main` or `integration`: it and upstream pull request 20 change the same function |
 | `feat/lora-merge-kernel` | LoRA shard-merge NKI kernel, on top of `feat/inplace-adapter-sync`, off by default | first hardware run at Qwen3-0.6B on 2026-11-24; acceptance rule open |
-| `feat/lm-head-pretransposed` | opt-in pre-transposed LM head weight, on upstream v0.1.0 | CPU only; its draft pull request conflicts with `integration` and is superseded by the branch below |
-| `feat/lm-head-pretransposed-integration` | the same change on `integration`, where the in-place weight reload also writes the LM head's own copy of a tied model | CPU only; pull request to `integration` |
+| `feat/lm-head-pretransposed` | opt-in pre-transposed LM head weight | CPU only; draft pull request to `integration` |
 
 To read or run an upstream pull request that is not in `integration`, fetch its head from upstream:
 
