@@ -259,7 +259,7 @@ Limits:
 - the device profiles of the session are not read, so there is no instruction-time figure for the sampler scope with and
   without the kernel.
 
-What remains: a `topk_topp` mode kernel; a full RL loop with the kernel on; larger models; a proposal upstream (draft pull request 25
+What remains: a `topk_topp` mode kernel on `main` (on `integration` since pull request 12, run 2026-11-26); a full RL loop with the kernel on; larger models; a proposal upstream (draft pull request 25
 upstream carries the temperature-mode kernel, opened 2026-11-25, Seattle time). Changed 2026-11-26: the `topk_topp` path below was written and CPU-tested, and ran on a device the same
 day (Qwen3-0.6B, TP4; [RESULTS.md](RESULTS.md) section 10).
 
@@ -526,6 +526,7 @@ Reading, with limits:
 - One run each, one model size, one tensor-parallel layout. None of this is a statement about 8B or about 27-32B.
 - Added 2026-11-26: the LM head's weight layout is now a switch on `main`, `SGLANG_NEURON_LM_HEAD_PRETRANSPOSED=1`
   (no kernel of its own; [RESULTS.md](RESULTS.md) section 9 has its trn2 speed and correctness rows). Device profiles
-  of those servers were analysed later (`devprof/`, `prof_all/` in the public data folder, linked from
-  [RESULTS.md](RESULTS.md) section 9); this table has no row for it and does not state whether the per-step transpose
+  of separate starts with the same switch (`lmh_on`, `lmh_off`, `devprof/records` in the public data folder, linked from
+  [RESULTS.md](RESULTS.md) section 9) were analysed later (`devprof/`); the profiles of the section 9 starts themselves
+  were not analysed. This table has no row for it and does not state whether the per-step transpose
   of the vocabulary shard is gone.

@@ -12,7 +12,7 @@ holds up on hardware back upstream.
 
 Current best (session of 2026-11-26, tok/s at concurrency 32, the two passes of each server):
 
-| Model | This fork, fastest server | vllm-neuron 0.29.0.1.2.0 | Details |
+| Model | This fork, best configuration (section 9 start) | vllm-neuron 0.29.0.1.2.0 | Details |
 |---|---|---|---|
 | Qwen3-0.6B | `main` with `RLKIT_SAMPLER_KERNEL=1` and `SGLANG_NEURON_LM_HEAD_PRETRANSPOSED=1`: 3,337.3 and 3,326.7 | 2,378.2 and 2,376.0 | [RESULTS.md](docs/rl/RESULTS.md) section 9; [data folder](https://github.com/pengchenglu1997/trainium-sglang-rl/tree/main/data/2026-11-26_trn2), files `lm_head/results/llmbench_b_lmh_q06_s1k_t0_p{1,2}.csv` and `i12_vllm_start/llmbench_b_q06_vllm_p{1,2}.csv` |
 | Qwen3-8B | `main` with `RLKIT_SAMPLER_KERNEL=1`: 1,501.1 and 1,500.2; the LM head switch changes nothing here (1,497.5 and 1,504.1 with it on) | 1,126.9 and 1,112.4 | [RESULTS.md](docs/rl/RESULTS.md) sections 8.3 and 9; [data folder](https://github.com/pengchenglu1997/trainium-sglang-rl/tree/main/data/2026-11-26_trn2), files `lm_head/results/llmbench_b_lmh_q8_s0k_t0_p{1,2}.csv`, `llmbench_b_lmh_q8_s1k_t0_p{1,2}.csv` and `serving/llmbench_b_q8_vllm_p{1,2}.csv` |
@@ -35,7 +35,7 @@ This page covers only what is different in the fork.
 | `main` | Upstream v0.1.0, plus our changes that have run on Trainium2 hardware (list below), plus `docs/rl/`. The default branch; start new work from here. | Pull request with the label `hardware-verified` |
 | `integration` | `main`, plus changes that have not run on hardware yet, plus upstream pull requests 20, 4, 9, 16, 17, 18 that upstream has not merged. | Pull request with the label `cpu-only` |
 | `upstream-main` | The upstream `main`, unchanged (commit `4e24326`, v0.1.0). Moved by hand when upstream moves. | Nobody; it is a copy |
-| `feat/*`, `fix/*` | One open piece of work each. Merged work is not listed below; its history is its pull request. A merged branch is deleted unless an upstream pull request still uses it. | The person who claimed the hub issue |
+| `feat/*`, `fix/*` | One open piece of work each. Merged work is not listed below; its history is its pull request. Merged branches are deleted later; until then they are not listed below. | The person who claimed the hub issue |
 
 A branch meant for an upstream pull request starts from `upstream-main`, so that this page, `AGENTS.md` and `docs/rl/`
 do not travel with it.
@@ -118,7 +118,7 @@ unless the row says otherwise. Every row, with its conditions and source file, i
 - `gh pr create` in a fork targets upstream by default. Always pass `--repo pengchenglu1997/sglang-neuron`.
 - Exactly one label; it says what evidence the change has: `hardware-verified` (it ran on a device; target `main`) or
   `cpu-only` (it did not; target `integration`). A check fails without a label; it does not look at the target.
-  Code that exists only on `integration` is fixed on `integration`, whatever the label (pull request 15).
+  Record: pull request 15 (`hardware-verified`) targeted `integration`, because the code it fixes exists only there.
   A change to this page, `AGENTS.md` or `docs/rl/` only may target `main`.
 - Someone other than the author reviews before merge.
 - The full rules are in [AGENTS.md](AGENTS.md).
@@ -130,4 +130,4 @@ unless the row says otherwise. Every row, with its conditions and source file, i
 | Tasks, results ledger, lessons, plans, status | team hub (private): https://github.com/pengchenglu1997/trainium-rl-hub |
 | Engine code, kernels, the public write-up of results | this repository |
 | Run scripts and raw result files | https://github.com/pengchenglu1997/trainium-sglang-rl |
-| The plugin's own documentation | [docs/](docs/index.md): upstream's pages plus `docs/rl/`; a few pages are edited (`git diff upstream-main -- docs`) |
+| The plugin's own documentation | [docs/](docs/index.md): upstream's pages plus `docs/rl/`; outside `docs/rl/`, two pages are edited on `main`, six on `integration` (`git diff origin/upstream-main -- docs`) |

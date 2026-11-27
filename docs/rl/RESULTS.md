@@ -284,8 +284,9 @@ Qwen3-8B, prompt 1024, 256 output tokens, SGLang-Neuron v0.1.0 released defaults
 
 vllm-neuron on Qwen3-8B: it did not start in two attempts on 2026-11-24 (TP4, max-model-len 4096, container). The
 compiler `neuronx-cc` exited with code 70 and the error `NCC_EVRF059`: the kernel file of
-`vendored_kernels.rotational_topk` "does not exist on the host". The start tests of 2026-11-26 found that this error comes from a stale NKI
-compile-result index in a reused cache folder (`i12_vllm_start/`, `i34_nki_index/` in the public data folder), and
+`vendored_kernels.rotational_topk` "does not exist on the host". The start tests of 2026-11-26 showed that a stale NKI
+compile-result index in a reused cache folder produces this error (`i12_vllm_start/`, `i34_nki_index/` in the public data folder);
+whether it caused the 2026-11-24 failures was not checked.
 vllm-neuron 0.29.0.1.2.0 on Qwen3-8B (TP4, max-model-len 4096, start on an empty cache folder) ran the same benchmark:
 1,126.9 and 1,112.4 tok/s at concurrency 32, TTFT p50 0.909 s and 0.955 s (two passes; files
 `serving/llmbench_b_q8_vllm_p{1,2}.csv` in [data/2026-11-26_trn2](https://github.com/pengchenglu1997/trainium-sglang-rl/tree/main/data/2026-11-26_trn2)). The SGLang-Neuron rows of the same session are in
@@ -551,8 +552,8 @@ benchmark start from the server's own cache):
 
 Limits: one session on a shared machine; two passes on one start per server, except switch 1 without the kernel (two starts); temperature 0 only in the
 speed rows; `main` has no in-place weight reload, so a weight update with the switch on was not run; whether the
-decode graph drops the per-step transpose is not stated here; the device profiles of this session were analysed later (`devprof/` and `prof_all/` in the
-public data folder, for the transpose `devprof/out/g04_transpose_where.txt`);
+decode graph drops the per-step transpose is not stated here; profiles of separate starts with the switch off and on (`lmh_off_nd`, `lmh_on_nd`) were analysed later in `devprof/` of the
+public data folder, the result is not stated here; the profiles of the starts in this section were not analysed;
 not run inside an RL loop. The switch adds one vocabulary shard per rank on a tied model (Qwen3-0.6B); Qwen3-8B is
 untied, its LM head only changes layout.
 
