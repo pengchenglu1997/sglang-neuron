@@ -38,7 +38,7 @@ Open work branches today:
 | `feat/lm-head-pretransposed` | opt-in pre-transposed LM head weight, on upstream v0.1.0 | merged into `integration` (pull request 1), and its commits are in `main` through `feat/lm-head-pretransposed-main` (pull request 13); superseded by `feat/lm-head-pretransposed-integration` and `feat/lm-head-pretransposed-main` |
 | `feat/lm-head-pretransposed-integration` | the same change on `integration`, where the in-place weight reload also writes the LM head's own copy of a tied model | merged into `integration`; the in-place reload with the switch on has not run on a device |
 | `feat/lm-head-pretransposed-main` | the same change on `main` (no in-place reload there) | merged into `main` (pull request 13); ran on trn2 as this tree, 2026-11-26 (numbers below) |
-| `feat/sampler-kernel-topk-topp` | the sampler kernel in the `topk_topp` mode, switch `RLKIT_SAMPLER_KERNEL_TOPK=1`, off by default | merged into `integration` (pull request 12), not into `main`; first hardware run at Qwen3-0.6B on 2026-11-26: with the switch on, logprobs at temperature 0 differed from the switch off. A fix is in pull request 15 to `integration` |
+| `feat/sampler-kernel-topk-topp` | the sampler kernel in the `topk_topp` mode, switch `RLKIT_SAMPLER_KERNEL_TOPK=1`, off by default | merged into `integration` (pull request 12), not into `main`; first hardware run at Qwen3-0.6B on 2026-11-26: with the switch on, logprobs at temperature 0 differed from the switch off; fixed in `integration` by pull request 15 (vocabulary mask always applied on the kernel path) |
 
 To read or run an upstream pull request that is not in `integration`, fetch its head from upstream:
 
