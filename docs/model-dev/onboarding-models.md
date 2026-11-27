@@ -124,7 +124,7 @@ to its checkpoint key, or to the list of keys it is concatenated from, and `Safe
 (`sglang_neuron/utils/checkpoints.py`) reads every mapped key from the local snapshot in parallel, places each shard on
 the device, and refuses a key the checkpoint does not hold. A parameter without a mapping is read under its own name, so
 the load fills every parameter or refuses. The graph's own `load_weights` ties a tied parameter again after the load
-(the dense transformer's LM head with `tie_word_embeddings`, `sglang_neuron/models/transformer/model.py`). The host
+(the dense transformer's LM head with `tie_word_embeddings`, unless `SGLANG_NEURON_LM_HEAD_PRETRANSPOSED=1` gives it its own copy, `sglang_neuron/models/transformer/model.py`). The host
 calls the first graph's `load_weights` only: an aggregated server's decode graph takes the prefill graph's device
 parameters and KV scales (`share_weights`, `sglang_neuron/models/host.py`), and a decode-graph parameter the prefill
 graph does not hold under the same name, shape and dtype is refused.
