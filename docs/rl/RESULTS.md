@@ -451,9 +451,12 @@ Conditions for every row of this section:
   `/v1/completions`, 64 requests per cell after 4 warm-up requests, concurrency 1, 8 and 32. Cell: tok/s
   (`output_token_throughput_tps`) / TTFT p50. Two passes on one server start, one after the other. The servers of a
   comparison ran one after the other on the same chip, from a warm compile cache of their own.
-- One session. Other jobs (compiles and benchmarks of other work) ran on the other chips of the same machine during
-  every row; the container list before and after each benchmark is in the result logs. No row was repeated on a quiet
-  machine.
+- One session. Other jobs (compiles and benchmarks of other work) ran on the same machine during every row; which chips
+  they used was not recorded. The container list before and after each benchmark is in the result logs. No row was
+  repeated on a quiet machine.
+- Provenance: the result files do not record the image tag, the instance type or the llmbench commit. The image tag and
+  the full llmbench commit (`08f416347db19bb45ff2489b8a69eacef62b6875`) are pinned in the session's setup script, and
+  the instance type is in the `neuron-ls` line of the session's setup log. Neither is in the public data yet.
 - Every request of every cell succeeded (0 errors).
 - The result files of this section (llmbench summaries, start-up events, the answers of the correctness check, server
   logs) are not in the public data repository yet.
@@ -488,19 +491,23 @@ Qwen3-8B:
 
 Reading, by division of the table values:
 
-- Qwen3-0.6B with the kernel: switch 1 is 2 to 3 percent above switch 0 at concurrency 1 (325.8 and 326.3 against
-  319.5 and 317.7) and at most 2.5 percent at concurrency 8 (1,654.6 against 1,613.9; pass 2 alone: 1.1 percent), within
-  the spread of the two passes there. At concurrency 32 it is 21.9 and 21.5 percent above (3,337.3 and 3,326.7 against
-  2,738.6 and 2,738.5). TTFT p50 does not move by more than 0.004 s.
+- Qwen3-0.6B with the kernel, switch 1 against switch 0, pass against pass: 2.0 and 2.7 percent above at concurrency 1
+  (325.8 and 326.3 against 319.5 and 317.7) and 1.6 and 1.1 percent at concurrency 8 (1,639.9 and 1,654.6 against
+  1,613.9 and 1,636.6). The two passes of one server differ by 0.6 percent (switch 0) and 0.1 percent (switch 1) at
+  concurrency 1, and by 1.4 and 0.9 percent at concurrency 8. So the gain at concurrency 1 is larger than the
+  difference between the passes, and at concurrency 8 about the size of it. With one start per server, a difference
+  between starts is not separated from the effect of the switch. At concurrency 32 it is 21.9 and 21.5 percent above
+  (3,337.3 and 3,326.7 against 2,738.6 and 2,738.5). TTFT p50 does not move by more than 0.004 s.
 - Qwen3-0.6B without the kernel: switch 1 is 54 to 60 percent above switch 0 at concurrency 1, 38 to 42 percent at
   concurrency 8 and 21 percent at concurrency 32 (both starts of switch 1). So at concurrency 1 and 8 the switch and the
-  kernel give about the same speed, alone or together; at concurrency 32 the two add. Why they overlap at low
-  concurrency was not examined.
+  kernel give about the same speed, alone or together; at concurrency 32 the two add. Switch 0 without the kernel had
+  one start, run later in the session than the kernel rows. Why they overlap at low concurrency was not examined.
 - Qwen3-8B with the kernel: no change (concurrency 32: 1,497.5 and 1,504.1 against 1,501.1 and 1,500.2; pass against
   pass, every cell within 1 percent). Qwen3-8B does not tie its embeddings.
 
-Correctness, switch 0 against switch 1, both with the kernel (method of section 8.5: 20 fixed prompts, 48 new tokens,
-temperature 0, one request at a time; a fork is the first position where the tokens differ, logprob differences are
+Correctness, switch 0 against switch 1, both with the kernel (method of section 8.5: 20 fixed prompts, at most 48 new tokens
+(`max_tokens` 48; on Qwen3-0.6B 6 prompts and on Qwen3-8B 1 prompt end earlier at the end of the sequence, so 860 and
+932 tokens are compared), temperature 0, one request at a time; a fork is the first position where the tokens differ, logprob differences are
 taken before a fork):
 
 | Check | Qwen3-0.6B | Qwen3-8B |
@@ -510,8 +517,9 @@ taken before a fork):
 | largest logprob difference | 0.0252 | 0.0320 |
 | GSM8K test, first 200 questions, temperature 0, up to 512 tokens | 0.565 with either switch; the same 113 questions right, McNemar p 1.0 | not run |
 
-The log line "sampler by the kernel" is in the log of every rank of each server run with the kernel and absent from the
-server without it.
+The log line "sampler by the kernel" is in the log of every rank of each server run with the kernel (4 lines per log,
+one per rank) and absent from the logs of the no-kernel servers (switch 1, both starts; switch 0), their compile starts
+included.
 
 Start-up, seconds to ready (cold: empty compile cache, four servers compiling at once on four chips; warm: the
 benchmark start from the server's own cache):
@@ -520,13 +528,13 @@ benchmark start from the server's own cache):
 |---|---|---|
 | Qwen3-0.6B switch 0, kernel | 561.6 | 284.9 |
 | Qwen3-0.6B switch 1, kernel | 556.6 | 279.8 |
-| Qwen3-0.6B switch 1, no kernel | 581.7 (compiled later, with two other servers of this section starting) | 279.8 |
+| Qwen3-0.6B switch 1, no kernel | 581.7 (compiled later, with two other servers of this section running) | 279.8 |
 | Qwen3-0.6B switch 0, no kernel | 606.4 (compiled with two other servers of this section running) | 254.6 |
 | Qwen3-0.6B switch 1, no kernel, second start | (cache copy) | 264.8 |
 | Qwen3-8B switch 0, kernel | 833.1 | 335.0 |
 | Qwen3-8B switch 1, kernel | 828.1 | 340.1 |
 
-Limits: one session on a shared machine; two passes on one start per server, no second start; temperature 0 only in the
+Limits: one session on a shared machine; two passes on one start per server, except switch 1 without the kernel (two starts); temperature 0 only in the
 speed rows; `main` has no in-place weight reload, so a weight update with the switch on was not run; whether the
 decode graph drops the per-step transpose was not read from a device profile (profiles were captured, not analysed);
 not run inside an RL loop. The switch adds one vocabulary shard per rank on a tied model (Qwen3-0.6B); Qwen3-8B is

@@ -54,7 +54,7 @@ git fetch https://github.com/sgl-project/sglang-neuron pull/<N>/head:upstream-pr
 | Pre-transposed LM head weight: the dense transformer's LM head holds its shard as `[hidden, vocab / tp]`, the layout its matmul reads; a tied model gets its own copy, filled from the embedding's checkpoint tensor (`sglang_neuron/models/transformer/`, `sglang_neuron/env_registry.py`, tests in `tests/cpu/`) | `SGLANG_NEURON_LM_HEAD_PRETRANSPOSED=1`; unset or `0`, the released layout | trn2, 2026-11-26, as this tree with the other two, Qwen3-0.6B and Qwen3-8B (numbers below). `main` has no in-place weight reload, so no weight update with the switch on has run |
 
 The first two were run on their own branches on 2026-11-24. On 2026-11-26 the tree with all three (the LM head switch
-off and on, the sampler kernel on) ran on trn2 ([docs/rl/RESULTS.md](docs/rl/RESULTS.md) section 9).
+off and on, with the sampler kernel on, and on Qwen3-0.6B also with it off) ran on trn2 ([docs/rl/RESULTS.md](docs/rl/RESULTS.md) section 9).
 
 ## Measured
 
