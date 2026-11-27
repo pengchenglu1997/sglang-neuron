@@ -3,8 +3,10 @@ name: team-checks
 # Fork only. Replaces team-pr-label-check. The rules and their checks: rl/tools/ (check_pr.py, check_docs.py,
 # check_data.py, scrub_check.py, upstream_ready.sh) and their fixtures in rl/tools/tests/.
 #   F1  label derived from the base and the changed paths   required (fails the job); runs the rl/tools directory
-#       that the BASE commit holds, so a pull request cannot loosen the rule it is judged by.
-#       Precondition of that sentence: .github/workflows/ and check_pr.py, common.py and the fixtures are lead-only in
+#       that the BASE commit holds, so a pull request cannot loosen the rule it is judged by. Only check_pr.py and
+#       common.py are copied from it into an empty directory and run with python -I, so no other file of that folder
+#       can shadow a standard-library module. Main is named by one sha, resolved from refs/remotes/origin/main.
+#       Precondition of that sentence: .github/workflows/ and all of rl/tools/ are lead-only in
 #       .github/CODEOWNERS, and the repository setting "require review from Code Owners" is on (the lead sets it; while
 #       it is off, the protection is only a convention).
 #       When the base holds no rl/tools: base main at the main bootstrap commit (this pull request itself) runs the pull
@@ -39,16 +41,20 @@ jobs:
           python-version: "3.12"
       - name: Fetch main for the sync rule
         # The checkout holds the whole history, so this only brings main's current tip (the public repository needs no credentials).
+        # The commit is resolved once, from the full ref name, and every later step uses that sha: the short name origin/main
+        # would also match a tag of that name (refs/tags wins over refs/remotes).
         run: |
           set -eu
           git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+          main_sha=$(git rev-parse --verify 'refs/remotes/origin/main^{commit}')
+          echo "main is $main_sha"
+          echo "MAIN_SHA=$main_sha" >> "$GITHUB_ENV"
       - name: F1 label from base and paths
         env:
           LABELS_JSON: ${{ toJson(github.event.pull_request.labels.*.name) }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          MAIN_REF: origin/main
         run: |
           set -eu
           # Bootstrap commits: the only bases without rl/tools whose pull request may run its own copy of the checker.
@@ -68,11 +74,11 @@ jobs:
               echo "the base is the main bootstrap commit without rl/tools: F1 runs the pull request's own copy"
             elif [ "$BASE_REF" = integration ] && [ "$BASE_SHA" = "$BOOT_INTEGRATION" ]; then
               # Never the pull request's copy: it would judge itself. Use the checker that main holds.
-              if git cat-file -e "$MAIN_REF:rl/tools/check_pr.py" 2>/dev/null && git cat-file -e "$MAIN_REF:rl/tools/common.py" 2>/dev/null; then
-                git archive "$MAIN_REF" rl/tools | (cd "$f1dir" && tar -x)
+              if [ -n "${MAIN_SHA:-}" ] && git cat-file -e "$MAIN_SHA:rl/tools/check_pr.py" 2>/dev/null && git cat-file -e "$MAIN_SHA:rl/tools/common.py" 2>/dev/null; then
+                git archive "$MAIN_SHA" rl/tools | (cd "$f1dir" && tar -x)
                 echo "the base is the integration bootstrap commit without rl/tools: F1 runs the rl/tools directory of main"
               else
-                echo "::error::F1: the integration bootstrap base holds no rl/tools and main ($MAIN_REF) could not be read or holds none either. F1 fails."
+                echo "::error::F1: the integration bootstrap base holds no rl/tools and main (${MAIN_SHA:-unresolved}) could not be read or holds none either. F1 fails."
                 exit 1
               fi
             elif [ "$BASE_REF" = main ] || [ "$BASE_REF" = integration ]; then
@@ -84,9 +90,14 @@ jobs:
               echo "the base ref $BASE_REF is outside the team rule (old label rule only): F1 runs the pull request's own copy"
             fi
           fi
+          # Run only check_pr.py and common.py, from a fresh directory, in isolated mode: a file of the base tools folder
+          # (json.py, re.py ...) cannot shadow a standard-library module, and PYTHON* variables are ignored.
+          f1run="$RUNNER_TEMP/f1-run"
+          rm -rf "$f1run"; mkdir -p "$f1run"
+          cp "$f1dir/rl/tools/check_pr.py" "$f1dir/rl/tools/common.py" "$f1run/"
           echo "base=$BASE_REF labels=$LABELS_JSON changed paths=$(tr -cd '\0' < "$RUNNER_TEMP/paths.z" | wc -c)"
-          python "$f1dir/rl/tools/check_pr.py" f1 --base "$BASE_REF" --labels-json "$LABELS_JSON" --paths-file "$RUNNER_TEMP/paths.z" \
-            --head "$HEAD_SHA" --main "$MAIN_REF" \
+          python -I "$f1run/check_pr.py" f1 --base "$BASE_REF" --labels-json "$LABELS_JSON" --paths-file "$RUNNER_TEMP/paths.z" \
+            --head "$HEAD_SHA" --main "${MAIN_SHA:-}" \
             || { echo "::error::F1: label rule failed. See AGENTS.md rule 6 and rl/tools/check_pr.py."; exit 1; }
 
   f9-selftests:
@@ -129,6 +140,11 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
+      - name: Fetch main for F2
+        run: |
+          set -eu
+          git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+          echo "MAIN_SHA=$(git rev-parse --verify 'refs/remotes/origin/main^{commit}')" >> "$GITHUB_ENV"
       - name: Report-mode checks (printed, never failing)
         env:
           LABELS_JSON: ${{ toJson(github.event.pull_request.labels.*.name) }}
@@ -145,7 +161,7 @@ jobs:
           python $T/check_pr.py classify --kind team -z < "$RUNNER_TEMP/changed_alive.z" > "$RUNNER_TEMP/team_files.z"
           printf '%s' "$PR_BODY" > "$RUNNER_TEMP/body.txt"
           step() { name="$1"; shift; echo "::group::$name"; if "$@"; then echo "$name: ok"; else echo "::warning::$name would fail (report mode)"; fi; echo "::endgroup::"; }
-          step "F2 hardware evidence" python $T/check_pr.py f2 --labels-json "$LABELS_JSON" --paths-file "$RUNNER_TEMP/paths.z" --body-file "$RUNNER_TEMP/body.txt" --head "$HEAD_SHA" --main origin/main
+          step "F2 hardware evidence" python $T/check_pr.py f2 --labels-json "$LABELS_JSON" --paths-file "$RUNNER_TEMP/paths.z" --body-file "$RUNNER_TEMP/body.txt" --head "$HEAD_SHA" --main "$MAIN_SHA"
           step "F3 scrub of changed team files" python $T/scrub_check.py --files-from-0 "$RUNNER_TEMP/team_files.z" --allow $T/scrub_allow.txt
           step "F4 public CPU lint" python $T/check_docs.py f4 --base "$BASE_SHA"
           if [ -e $T/best.py ]; then

@@ -551,7 +551,7 @@ class WorkflowF1RunsTheBaseCopy(unittest.TestCase):
         with open(script, "w", newline="\n") as fh:
             fh.write(block)
         env = {"RUNNER_TEMP": self.rtemp, "LABELS_JSON": json.dumps(labels), "BASE_REF": base_ref,
-               "BASE_SHA": base, "HEAD_SHA": head, "MAIN_REF": main_ref}
+               "BASE_SHA": base, "HEAD_SHA": head, "MAIN_SHA": main_ref}
         return run(["bash", script], self.r.dir, env=env)
 
     def tamper(self):
@@ -735,7 +735,7 @@ class WorkflowF1RunsTheBaseCopy(unittest.TestCase):
         with open(os.path.join(ROOT, ".github", "CODEOWNERS"), encoding="utf-8") as fh:
             lines = [l.split() for l in fh if l.strip() and not l.startswith("#")]
         star = next(i for i, l in enumerate(lines) if l[0] == "*")
-        for path in ("/rl/tools/check_pr.py", "/rl/tools/common.py", "/rl/tools/tests/"):
+        for path in ("/rl/tools/",):
             idx = [i for i, l in enumerate(lines) if l[0] == path]
             self.assertTrue(idx and idx[0] > star, path)       # the last matching line wins, so it must come after "*"
 

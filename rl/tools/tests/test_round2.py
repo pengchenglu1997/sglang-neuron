@@ -299,7 +299,7 @@ class WorkflowHardening(unittest.TestCase):
             script = os.path.join(rt, "report.sh")
             with open(script, "w", newline="\n") as fh:
                 fh.write(block("Report-mode checks (printed, never failing)"))
-            env = {"RUNNER_TEMP": rt, "LABELS_JSON": "[]", "PR_BODY": "", "BASE_SHA": "0" * 40, "HEAD_SHA": good}
+            env = {"RUNNER_TEMP": rt, "LABELS_JSON": "[]", "PR_BODY": "", "BASE_SHA": "0" * 40, "HEAD_SHA": good, "MAIN_SHA": good}
             code, out, err = run(["bash", script], r.dir, env=env)
             self.assertNotEqual(code, 0, out + err)
             self.assertNotIn(": ok", out)
