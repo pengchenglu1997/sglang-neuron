@@ -17,7 +17,7 @@ name: team-checks
 #       equals main (rl/tools/check_pr.py, sync rule).
 #   F9  selftests of the tools                              required (fails the job)
 #   F2-F8, F10                                              report mode: printed as warnings, the job never fails
-# F5 (generated blocks) has no tool yet: best.py and switches.py arrive with rl/best.tsv.
+# F5 (generated blocks) runs best.py, switches.py and check_tables.py in the report job below; it fails nothing yet.
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled, edited]
@@ -149,6 +149,7 @@ jobs:
         env:
           LABELS_JSON: ${{ toJson(github.event.pull_request.labels.*.name) }}
           PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
@@ -164,11 +165,16 @@ jobs:
           step "F2 hardware evidence" python $T/check_pr.py f2 --labels-json "$LABELS_JSON" --paths-file "$RUNNER_TEMP/paths.z" --body-file "$RUNNER_TEMP/body.txt" --head "$HEAD_SHA" --main "$MAIN_SHA"
           step "F3 scrub of changed team files" python $T/scrub_check.py --files-from-0 "$RUNNER_TEMP/team_files.z" --allow $T/scrub_allow.txt
           step "F4 public CPU lint" python $T/check_docs.py f4 --base "$BASE_SHA"
-          if [ -e $T/best.py ]; then
-            step "F5 generated blocks" python $T/best.py --check README.md docs/rl/RESULTS.md
+          # F5: best.tsv rows and the best blocks; the switches table and the default-on exception list (only where the
+          # base is main or integration, diffed against upstream-main); make_tables.py output against tables.txt.
+          # A document without a generated block is reported as not checked until the docs step adds the markers.
+          step "F5 best.tsv and best blocks" python $T/best.py --check README.md docs/rl/RESULTS.md
+          if [ "$BASE_REF" = main ] || [ "$BASE_REF" = integration ]; then
+            step "F5 switches" python $T/switches.py --check README.md --base origin/upstream-main --branch "HEAD=$BASE_REF"
           else
-            echo "F5 generated blocks: not checked, rl/tools/best.py and switches.py do not exist yet"
+            echo "F5 switches: not checked, the base $BASE_REF is neither main nor integration"
           fi
+          step "F5 tables.txt against make_tables.py" python $T/check_tables.py
           step "F6 data folders" python $T/check_data.py --base "$BASE_SHA" --head "$HEAD_SHA"
           step "F7 links and paths" python $T/check_docs.py f7 --base "$BASE_SHA"
           step "F8 state wording on added lines" python $T/check_docs.py f8 --base "$BASE_SHA" --head "$HEAD_SHA"
