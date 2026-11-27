@@ -21,6 +21,7 @@ SCRUB = os.path.join(TOOLS, "scrub_check.py")
 CHECK_PR = os.path.join(TOOLS, "check_pr.py")
 BAD_ID = "i-" + "0123456789abcdef0"      # built from pieces so that this file is not itself a hit
 BS = chr(92)
+AT = chr(64)
 HAVE_BASH = shutil.which("bash") is not None
 
 
@@ -148,22 +149,22 @@ class ScrubMissingAndStrip(unittest.TestCase):
         self.assertEqual(code, 2, err)
 
     def test_allow_with_matched_text_is_narrow(self):
-        self.r.write("rl/x.md", "uses: a/checkout@v4\nping root@box\n")
-        self.r.write("allow.txt", "rl/x.md\tuser-at-host\treason\tcheckout@\n")
+        self.r.write("rl/x.md", "uses: a/checkout" + AT + "v4\nping root" + AT + "box\n")
+        self.r.write("allow.txt", "rl/x.md\tuser-at-host\treason\tcheckout" + AT + "\n")
         code, out, _ = self.scrub("rl/x.md", "--allow", "allow.txt")
         self.assertEqual(code, 1, out)
-        self.assertIn("'root@'", out)
+        self.assertIn("'root" + AT + "'", out)
         self.assertIn("accepted on purpose: 1", out)
 
     def test_second_match_on_a_line_is_not_hidden(self):
-        self.r.write("rl/x.md", "uses: a/checkout@v4 and root@box\n")
-        self.r.write("allow.txt", "rl/x.md\tuser-at-host\treason\tcheckout@\n")
+        self.r.write("rl/x.md", "uses: a/checkout" + AT + "v4 and root" + AT + "box\n")
+        self.r.write("allow.txt", "rl/x.md\tuser-at-host\treason\tcheckout" + AT + "\n")
         code, out, _ = self.scrub("rl/x.md", "--allow", "allow.txt")
         self.assertEqual(code, 1, out)
-        self.assertIn("'root@'", out)
+        self.assertIn("'root" + AT + "'", out)
 
     def test_whole_file_entry_still_accepts_every_hit(self):
-        self.r.write("rl/x.md", "a/checkout@v4 and root@box\n")
+        self.r.write("rl/x.md", "a/checkout" + AT + "v4 and root" + AT + "box\n")
         self.r.write("allow.txt", "rl/x.md\tuser-at-host\treason\n")
         code, _, _ = self.scrub("rl/x.md", "--allow", "allow.txt")
         self.assertEqual(code, 0)
@@ -175,7 +176,7 @@ class ScrubMissingAndStrip(unittest.TestCase):
         self.assertIn("instance-id", out)
 
     def test_allow_file_path_columns_are_not_scrubbed(self):
-        self.r.write("rl/tools/scrub_allow.txt", "rl/x.md\tuser-at-host\tclean reason\troot@\n")
+        self.r.write("rl/tools/scrub_allow.txt", "rl/x.md\tuser-at-host\tclean reason\troot" + AT + "\n")
         code, out, _ = self.scrub("rl/tools/scrub_allow.txt")
         self.assertEqual(code, 0, out)
 
@@ -446,7 +447,7 @@ class ReplayF2Pr13(unittest.TestCase):
 
     @classmethod
     def g(cls, *args):
-        r = subprocess.run(["git", "-c", "user.email=t@example.invalid", "-c", "user.name=t", "-c", "commit.gpgsign=false"] + list(args),
+        r = subprocess.run(["git", "-c", "user.email=t" + AT + "example.invalid", "-c", "user.name=t", "-c", "commit.gpgsign=false"] + list(args),
                            cwd=cls.dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         if r.returncode != 0:
             raise RuntimeError(r.stderr.decode("utf-8", "replace"))
