@@ -10,7 +10,7 @@
 #    that folder exists, and every tests/**/selftest_*.py script as python <script>. When the branch has neither, the
 #    tests are NOT CHECKED and the branch is not called READY (exit 3). --skip-tests: not run, and the last line says so.
 # Exit status: 0 ready, 1 not ready, 2 bad input or a failed tool, 3 TEAM paths clean but no CPU test found.
-# The checkout and its branches are not changed.
+# The checkout and its branches are not changed. The script first changes to the top level of the checkout it is run in.
 set -u
 set -o pipefail
 
@@ -33,6 +33,10 @@ PY="${PYTHON:-}"
 if [ -z "$PY" ]; then
   if command -v python >/dev/null 2>&1; then PY=python; else PY=python3; fi
 fi
+
+# Work from the top of the repository, whatever folder the script is started in (the tests and the paths are relative to it).
+TOP="$(git rev-parse --show-toplevel 2>/dev/null)" && [ -n "$TOP" ] || { echo "upstream_ready: not inside a git checkout" >&2; exit 2; }
+cd "$TOP" || { echo "upstream_ready: cannot enter $TOP" >&2; exit 2; }
 
 git rev-parse --verify --quiet "$BRANCH^{commit}" >/dev/null || { echo "upstream_ready: no such branch or commit: $BRANCH" >&2; exit 2; }
 git rev-parse --verify --quiet "$BASE^{commit}" >/dev/null || { echo "upstream_ready: no such base: $BASE (git fetch origin upstream)" >&2; exit 2; }

@@ -22,7 +22,7 @@ class F1Fixtures(unittest.TestCase):
         cases = load("f1_cases.json")
         self.assertGreater(len(cases), 15)
         for c in cases:
-            ok, msgs = check_pr.f1(c["base"], c["labels"], c["paths"])
+            ok, msgs = check_pr.f1(c["base"], c["labels"], c["paths"], c.get("sync"))
             text = " ".join(msgs)
             self.assertEqual(ok, c["expect"] == "pass", "%s: %s" % (c["name"], text))
             self.assertIn(c["reason"], text, c["name"])

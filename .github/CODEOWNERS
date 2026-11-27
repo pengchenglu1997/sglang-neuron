@@ -12,6 +12,9 @@
 /rl/best.tsv          @pengchenglu1997
 /.github/workflows/   @pengchenglu1997
 /.github/CODEOWNERS   @pengchenglu1997
+# The root .gitattributes (a TEAM path) is tier 3: it changes how every file is stored and compared, so only the lead
+# approves it. F1 treats it like any other team path.
+/.gitattributes       @pengchenglu1997
 # F1 (the required label rule) is its own check_pr.py and common.py, and the fixtures that pin its verdicts. The rest of
 # rl/tools/ is tier 2. Without these lines one teammate approval could change the rule that judges the same pull request.
 /rl/tools/check_pr.py @pengchenglu1997

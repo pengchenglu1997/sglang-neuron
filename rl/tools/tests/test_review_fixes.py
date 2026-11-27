@@ -23,6 +23,8 @@ BAD_ID = "i-" + "0123456789abcdef0"      # built from pieces so that this file i
 BS = chr(92)
 AT = chr(64)
 HAVE_BASH = shutil.which("bash") is not None
+BOOT_MAIN = "297c35cae629a3fe4fe9d04ada2ec8a84487ecfd"          # main before rl/tools existed
+BOOT_INTEGRATION = "749704d8d9c57b67bb61e5ed38c769b0815dcaac"   # tip of integration when the sync rule was written
 
 
 def run(args, cwd, input=None, env=None):
@@ -505,10 +507,10 @@ class ReplayF2Pr13(unittest.TestCase):
 WORKFLOW_STEP = "F1 label from base and paths"
 
 
-def f1_run_block():
+def f1_run_block(step=WORKFLOW_STEP):
     with open(WORKFLOW, encoding="utf-8") as fh:
         lines = fh.read().split("\n")
-    i = next(k for k, l in enumerate(lines) if ("name: " + WORKFLOW_STEP) in l)
+    i = next(k for k, l in enumerate(lines) if ("name: " + step) in l)
     j = next(k for k in range(i, len(lines)) if lines[k].strip() == "run: |")
     body = []
     for l in lines[j + 1:]:
@@ -540,12 +542,16 @@ class WorkflowF1RunsTheBaseCopy(unittest.TestCase):
             self.r.write("rl/tools/" + n, data)
         return self.r.commit("base")
 
-    def step(self, base, head, labels, base_ref="main"):
+    def step(self, base, head, labels, base_ref="main", bootstrap=None, main_ref="main"):
+        """Run the workflow's F1 step. bootstrap: shas that stand in for the two hard-coded bootstrap commits."""
+        block = f1_run_block()
+        if bootstrap is not None:
+            block = block.replace(BOOT_MAIN, bootstrap[0]).replace(BOOT_INTEGRATION, bootstrap[1])
         script = os.path.join(self.rtemp, "step.sh")
         with open(script, "w", newline="\n") as fh:
-            fh.write(f1_run_block())
+            fh.write(block)
         env = {"RUNNER_TEMP": self.rtemp, "LABELS_JSON": json.dumps(labels), "BASE_REF": base_ref,
-               "BASE_SHA": base, "HEAD_SHA": head}
+               "BASE_SHA": base, "HEAD_SHA": head, "MAIN_REF": main_ref}
         return run(["bash", script], self.r.dir, env=env)
 
     def tamper(self):
@@ -562,7 +568,7 @@ class WorkflowF1RunsTheBaseCopy(unittest.TestCase):
         head = self.r.commit("pr")
         code, out, _ = self.step(base, head, [])
         self.assertNotEqual(code, 0, out)
-        self.assertIn("copy of check_pr.py and common.py at the base commit", out)
+        self.assertIn("rl/tools directory of the base commit", out)
         self.assertIn("exactly one", out)
 
     def test_control_the_pull_requests_own_copy_would_have_passed(self):
@@ -599,16 +605,76 @@ class WorkflowF1RunsTheBaseCopy(unittest.TestCase):
         code, out, _ = self.step(base, head, ["cpu-only,x"], base_ref="integration")
         self.assertNotEqual(code, 0, out)
 
-    def test_base_without_tools_uses_the_pull_requests_copy(self):
+    def pr_adding_tools_on_a_base_without_them(self):
         self.r.write("README.md", "r\n")
         base = self.r.commit("base")
         self.r.git("checkout", "-q", "-b", "pr")
         for n, data in self.tools.items():
             self.r.write("rl/tools/" + n, data)
         head = self.r.commit("pr")
+        return base, head
+
+    def test_bootstrap_base_without_tools_uses_the_pull_requests_copy(self):
+        base, head = self.pr_adding_tools_on_a_base_without_them()
+        code, out, _ = self.step(base, head, [], bootstrap=(base, "0" * 40))
+        self.assertEqual(code, 0, out)
+        self.assertIn("bootstrap commit without rl/tools", out)
+        # into integration the team paths must also equal main: here main is the head itself (a sync)
+        code, out, _ = self.step(base, head, [], base_ref="integration", bootstrap=("1" * 40, base), main_ref=head)
+        self.assertEqual(code, 0, out)
+
+    def test_non_bootstrap_base_without_tools_fails_for_main_and_integration(self):
+        base, head = self.pr_adding_tools_on_a_base_without_them()
+        for ref in ("main", "integration"):
+            code, out, _ = self.step(base, head, [], base_ref=ref, bootstrap=("1" * 40, "2" * 40))
+            self.assertEqual(code, 1, out)
+            self.assertIn("is not a bootstrap commit", out)
+            self.assertNotIn("PASS", out)
+
+    def test_other_base_ref_without_tools_runs_the_old_rule_with_the_pull_requests_copy(self):
+        base, head = self.pr_adding_tools_on_a_base_without_them()
+        code, out, _ = self.step(base, head, ["cpu-only"], base_ref="feat/x", bootstrap=("1" * 40, "2" * 40))
+        self.assertEqual(code, 0, out)
+        code, out, _ = self.step(base, head, [], base_ref="feat/x", bootstrap=("1" * 40, "2" * 40))
+        self.assertEqual(code, 1, out)
+
+    def test_workflow_holds_the_two_bootstrap_shas(self):
+        self.assertEqual(len(BOOT_MAIN), 40)
+        self.assertEqual(len(BOOT_INTEGRATION), 40)
+        block = f1_run_block()
+        self.assertIn("BOOT_MAIN=" + BOOT_MAIN, block)
+        self.assertIn("BOOT_INTEGRATION=" + BOOT_INTEGRATION, block)
+
+    def test_whole_tools_folder_of_the_base_is_extracted(self):
+        base = self.base_with_tools()
+        self.r.write("rl/tools/extra_module.py", "x = 1\n")
+        base = self.r.commit("base 2")
+        self.r.git("checkout", "-q", "-b", "pr")
+        self.r.write("rl/x.md", "x\n")
+        head = self.r.commit("pr")
         code, out, _ = self.step(base, head, [])
         self.assertEqual(code, 0, out)
-        self.assertIn("the base has no rl/tools/check_pr.py yet", out)
+        self.assertTrue(os.path.exists(os.path.join(self.rtemp, "f1-from-base", "rl", "tools", "extra_module.py")))
+
+    def test_sync_into_integration_passes_and_differing_team_file_fails(self):
+        base = self.base_with_tools()
+        self.r.write("rl/a.md", "a\n")
+        self.r.commit("main moves")
+        main_sha = self.r.git("rev-parse", "HEAD")
+        self.r.git("checkout", "-q", "-b", "integ", base)
+        integ = self.r.commit("integration tip")
+        self.r.git("checkout", "-q", "-b", "pr", integ)
+        self.r.write("rl/a.md", "a\n")                       # same as main
+        head = self.r.commit("sync")
+        code, out, _ = self.step(integ, head, [], base_ref="integration", main_ref=main_sha)
+        self.assertEqual(code, 0, out)
+        self.assertIn("sync from main", out)
+        self.r.git("checkout", "-q", "-b", "pr2", integ)
+        self.r.write("rl/a.md", "not what main has\n")
+        head2 = self.r.commit("edit")
+        code, out, _ = self.step(integ, head2, [], base_ref="integration", main_ref=main_sha)
+        self.assertEqual(code, 1, out)
+        self.assertIn("not a sync from main", out)
 
     def test_codeowners_lists_the_f1_files_for_the_lead(self):
         with open(os.path.join(ROOT, ".github", "CODEOWNERS"), encoding="utf-8") as fh:

@@ -12,13 +12,15 @@ F4  public-CPU lint: in docs/rl/**, README.md and rl/**/*.md, a line that matche
     An allow entry "<path><TAB>public-cpu-lint<TAB><reason><TAB><line>" accepts that one line (white space collapsed).
 F8  state lint on the lines added between base and head: phrases that state a changing fact. Lines of
     a quoted block (starting with >) are exempt.
-F10 no ENGINE file mentions rl/ or imports from it.
+F10 no ENGINE file mentions rl/ or imports from it; no symlink (git mode 120000) outside TEAM paths leads into a team
+    path (following the links on the way), and no symlink under TEAM paths leads outside them.
 The prose checks (F7, F4, F8) skip only frozen records that already exist: a file under rl/data/, rl/patches/ or
 rl/docs/ that is listed in rl/data/LEGACY.sha256, or (with --base) that exists at the base. A file there that a pull
 request adds is linted like any other.
 Exit status: 0 pass, 1 fail, 2 bad input.
 """
 import argparse
+import posixpath
 import re
 import sys
 
@@ -213,8 +215,66 @@ def f8(base, head, repo="."):
     return not msgs, msgs or ["F8: no state wording on added lines."]
 
 
-def f10(repo="."):
+def symlinks(repo="."):
+    """{path: target text} of every tracked symlink (git mode 120000), read from the index so that a checkout without
+    symlink support gives the same answer."""
+    out = common.git(["ls-files", "-s", "-z"], cwd=repo)
+    res = {}
+    for rec in out.split("\0"):
+        if not rec:
+            continue
+        meta, path = rec.split("\t", 1)
+        mode, oid, _stage = meta.split()
+        if mode == "120000":
+            data = common.git(["cat-file", "blob", oid], cwd=repo, binary=True)
+            res[path] = (data or b"").decode("utf-8", "replace")
+    return res
+
+
+def resolve_link(path, links, depth=0):
+    """The repository-relative path that path leads to once every symlink on the way is followed; None when it
+    leaves the repository (an absolute target, too many ..) or loops."""
+    if depth > 20:
+        return None
+    path = posixpath.normpath(path)
+    comps = path.split("/")
+    for i in range(len(comps)):
+        prefix = "/".join(comps[:i + 1])
+        if prefix in links:
+            target = links[prefix]
+            if not target or target.startswith("/"):
+                return None
+            new = posixpath.normpath(posixpath.join(posixpath.dirname(prefix), target))
+            if new == ".." or new.startswith("../"):
+                return None
+            return resolve_link("/".join([new] + comps[i + 1:]), links, depth + 1)
+    return path
+
+
+def f10_symlinks(repo="."):
+    """Messages for a symlink outside TEAM paths that leads into a team path (or onto a folder that holds one), and for
+    a symlink under TEAM paths that leads outside them."""
+    links = symlinks(repo)
+    if not links:
+        return []
+    paths = tracked(repo)
+    team_paths = [p for p in paths if common.is_team(p)]
     msgs = []
+    for link in sorted(links):
+        dest = resolve_link(link, links)
+        in_team = dest is not None and (common.is_team(dest) or common.is_team(dest + "/"))
+        if common.is_team(link):
+            if not in_team:
+                msgs.append("F10: %s:1 is a symlink under team paths that points outside them (-> %s)." % (link, links[link]))
+        elif dest is not None:
+            holds_team = in_team or dest == "." or any(p.startswith(dest + "/") for p in team_paths)
+            if holds_team:
+                msgs.append("F10: %s:1 is a symlink outside team paths that points into a team path (-> %s)." % (link, links[link]))
+    return msgs
+
+
+def f10(repo="."):
+    msgs = f10_symlinks(repo)
     imp = re.compile(r"^\s*(?:from|import)\s+rl(?:\.|\s|$)")
     ment = re.compile(r"(?<![A-Za-z0-9_.])rl/")
     for p in tracked(repo):
@@ -227,7 +287,7 @@ def f10(repo="."):
             if imp.match(line) or ment.search(line):
                 msgs.append("F10: %s:%d mentions or imports rl/." % (p, n))
                 break
-    return not msgs, msgs or ["F10: no engine file mentions rl/."]
+    return not msgs, msgs or ["F10: no engine file mentions rl/, and no symlink crosses between team and engine paths."]
 
 
 def main(argv=None):

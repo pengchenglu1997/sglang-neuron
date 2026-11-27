@@ -22,6 +22,7 @@ class Repo(object):
         self.git("config", "user.name", "t")
         self.git("config", "core.autocrlf", "false")
         self.git("config", "commit.gpgsign", "false")
+        self.links = {}
 
     def git(self, *args):
         r = subprocess.run(["git"] + list(args), cwd=self.dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -38,8 +39,16 @@ class Repo(object):
     def remove(self, path):
         os.remove(os.path.join(self.dir, *path.split("/")))
 
+    def symlink(self, path, target):
+        """Record a symlink (git mode 120000) in the index at the next commit; works where the file system has none."""
+        self.links[path] = target
+
     def commit(self, msg="c"):
         self.git("add", "-A")
+        for path, target in self.links.items():
+            p = subprocess.run(["git", "hash-object", "-w", "--stdin"], cwd=self.dir, input=target.encode("utf-8"),
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.git("update-index", "--add", "--cacheinfo", "120000,%s,%s" % (p.stdout.decode().strip(), path))
         self.git("commit", "-q", "--allow-empty", "-m", msg)
         return self.git("rev-parse", "HEAD")
 

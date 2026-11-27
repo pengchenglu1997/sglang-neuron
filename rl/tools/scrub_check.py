@@ -16,7 +16,8 @@ Scans every file under each PATH (text and binary) for things that must not be p
   and the project-internal words of a private word list (one word or phrase per line, matched without
   regard to case, kept outside the repository, because the list itself holds names).
 A file that is not valid UTF-8 is reported as a hit. The exit status is 1 when anything was found.
-This script holds the patterns as text and is not scanned; scrub_allow.txt is scanned in its reason column only.
+This script is scanned like every file; the words it must hold as patterns are accepted by entries in scrub_allow.txt.
+scrub_allow.txt is scanned in its reason column only.
 A listed path that does not exist is an error (exit 2), never "nothing to scan". Lists are read without stripping;
 use --files-from-0 for a list that may hold a name with a newline.
 --allow FILE: lines "path<TAB>pattern name<TAB>reason[<TAB>matched text]" for hits that are accepted on purpose (the
@@ -80,8 +81,9 @@ def allow_reason(allow, rel, name, matched):
     return None
 
 
-# These hold the patterns as text and are not scanned. The allow file is scanned apart: only its reason column.
-SKIP = ("scrub_report.txt", "scrub_check.py", "rl/tools/scrub_check.py")
+# Only the report this tool writes is not scanned. The scrubber's own file is scanned like any other: the lines that must
+# hold the patterns as text are accepted by entries in scrub_allow.txt. The allow file is scanned apart: its reason column only.
+SKIP = ("scrub_report.txt",)
 ALLOW_FILES = ("scrub_allow.txt", "rl/tools/scrub_allow.txt")
 
 

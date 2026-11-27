@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """Pull request checks F1 (label from base and paths) and F2 (hardware evidence).
 
-    check_pr.py f1 --base BASE (--labels a,b | --labels-json '["a","b"]') --paths-file FILE|-
+    check_pr.py f1 --base BASE (--labels a,b | --labels-json '["a","b"]') --paths-file FILE|- [--head REV --main REV [--repo DIR]]
     check_pr.py f2 (--labels a,b | --labels-json JSON) --paths-file FILE|- --body-file FILE --head REV [--main REV] [--repo DIR]
     check_pr.py classify --kind team|engine [-z] < paths  (prints the paths of that kind, one per line or NUL-separated)
     check_pr.py replay --pr N [--repo OWNER/NAME]        (F1 on a real pull request, read with gh)
 
 F1 (fails the job):
-  - a TEAM-only pull request needs no label and must target main (a label, if present, must not be both);
+  - a TEAM-only pull request needs no label and must target main (a label, if present, must not be both),
+    or target integration as a sync from main (next point);
+  - sync rule: a pull request into integration that changes a TEAM path passes only when it is a sync from main, that is,
+    every TEAM path at --head has the same mode and blob id as at --main (git ls-tree of the two commits, whole trees,
+    so an extra, a missing or a different team file fails). A sync that also carries ENGINE paths still needs exactly
+    one label (cpu-only for the sync of the layout migration). Without --head and --main nothing counts as a sync;
   - a pull request with any ENGINE path carries exactly one of cpu-only (base integration only) or
     hardware-verified (base main or integration);
   - never both labels; a pull request with no changed path needs one label (the old rule);
@@ -33,8 +38,30 @@ import common  # noqa: E402
 HW, CPU = "hardware-verified", "cpu-only"
 
 
-def f1(base, labels, paths):
-    """(ok, messages)."""
+def team_tree(rev, repo="."):
+    """{TEAM path: (mode, blob id)} of every TEAM path at rev (git ls-tree -r of the whole tree)."""
+    out = common.git(["ls-tree", "-r", "-z", rev], cwd=repo)
+    res = {}
+    for rec in out.split("\0"):
+        if not rec:
+            continue
+        meta, path = rec.split("\t", 1)
+        mode, _typ, oid = meta.split()
+        if common.is_team(path):
+            res[path] = (mode, oid)
+    return res
+
+
+def sync_differences(head, main, repo="."):
+    """Sorted TEAM paths whose mode or blob id differ between head and main, or that exist on one side only.
+    An empty list means that head is a sync from main."""
+    a, b = team_tree(head, repo), team_tree(main, repo)
+    return sorted(p for p in set(a) | set(b) if a.get(p) != b.get(p))
+
+
+def f1(base, labels, paths, sync=None):
+    """(ok, messages). sync: None when it was not computed; otherwise the list of TEAM paths on which the head differs
+    from main (an empty list: the pull request is a sync from main)."""
     ev = [l for l in labels if l in common.EVIDENCE_LABELS]
     ev_set = sorted(set(ev))
     msgs = []
@@ -50,7 +77,20 @@ def f1(base, labels, paths):
             return False, ["F1: no changed path and %d evidence labels; exactly one is required." % len(ev)]
         return True, ["F1: no changed path; one label present."]
     engine = [p for p in paths if not common.is_team(p)]
+    team = [p for p in paths if common.is_team(p)]
+    is_sync = False
+    if base == "integration" and team and ev != [HW]:
+        # A hardware-verified pull request keeps the old allowance: it may carry its own rl/data and docs/rl lines
+        # (pull request 15 did). Every other pull request that changes a team path into integration must be a sync.
+        if sync is None:
+            return False, ["F1: a pull request into integration changes a team path (%s) and was not compared with main; only a sync from main may do that." % team[0]]
+        if sync:
+            return False, ["F1: a pull request into integration changes team paths and is not a sync from main: %d team path(s) differ from main (%s%s)."
+                           % (len(sync), ", ".join(sync[:3]), ", ..." if len(sync) > 3 else "")]
+        is_sync = True
     if not engine:
+        if is_sync:
+            return True, ["F1: team-only pull request into integration; every team path equals main (sync from main); no label needed (%s)." % (ev_set[0] if ev_set else "none given")]
         if base != "main":
             return False, ["F1: a team-only pull request (rl/, docs/rl/, README.md, AGENTS.md, CLAUDE.md, .github/, .gitattributes) must target main, not %s." % base]
         return True, ["F1: team-only pull request into main; no label needed (%s)." % (ev_set[0] if ev_set else "none given")]
@@ -59,7 +99,7 @@ def f1(base, labels, paths):
                        % (engine[0], " and %d more" % (len(engine) - 1) if len(engine) > 1 else "", len(ev))]
     if ev[0] == CPU and base != "integration":
         return False, ["F1: cpu-only engine changes target integration, never %s." % base]
-    return True, ["F1: engine pull request into %s with label %s." % (base, ev[0])]
+    return True, ["F1: engine pull request into %s with label %s%s." % (base, ev[0], "; its team paths equal main (sync from main)" if is_sync else "")]
 
 
 def parse_manifest(text):
@@ -173,6 +213,9 @@ def main(argv=None):
     p1.add_argument("--labels", default="")
     p1.add_argument("--labels-json")
     p1.add_argument("--paths-file", required=True)
+    p1.add_argument("--head", help="the pull request head; with --main, it enables the sync rule for integration")
+    p1.add_argument("--main", help="the fork's main at the time of the check (a ref or a sha)")
+    p1.add_argument("--repo", default=".")
     p2 = sub.add_parser("f2")
     p2.add_argument("--labels", default="")
     p2.add_argument("--labels-json")
@@ -190,7 +233,11 @@ def main(argv=None):
     a = ap.parse_args(argv)
     try:
         if a.cmd == "f1":
-            ok, msgs = f1(a.base, labels_arg(a.labels, a.labels_json), read_paths_arg(a.paths_file))
+            paths = read_paths_arg(a.paths_file)
+            sync = None
+            if a.base == "integration" and a.head and a.main and any(common.is_team(p) for p in paths):
+                sync = sync_differences(a.head, a.main, a.repo)
+            ok, msgs = f1(a.base, labels_arg(a.labels, a.labels_json), paths, sync)
         elif a.cmd == "f2":
             body = open(a.body_file, encoding="utf-8", errors="replace").read()
             ok, msgs = f2(labels_arg(a.labels, a.labels_json), read_paths_arg(a.paths_file), body, a.head, a.main, a.repo)
