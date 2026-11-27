@@ -155,6 +155,11 @@ class SwitchesTest(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("mixed line endings", out)
 
+    def test_the_real_exceptions_file_lists_the_carried_mode_switch(self):
+        path = os.path.join(os.path.dirname(os.path.dirname(helpers.TOOLS)), "rl", "tools", "switches_exceptions.txt")
+        exc = switches.read_exceptions(path)
+        self.assertIn("carried", exc["SGLANG_NEURON_MOE_PREFILL"])
+
     def test_unknown_base_and_branch_are_bad_input(self):
         out, err = io.StringIO(), io.StringIO()
         with redirect_stdout(out), redirect_stderr(err):

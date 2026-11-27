@@ -138,6 +138,19 @@ class ForkState(unittest.TestCase):
         self.r.git("update-ref", "refs/remotes/upstream/main", self.r.git("rev-parse", "refs/remotes/origin/main"))
         self.assertIn("DIFFERENT", self.section(self.run_sh()[1], "mirror"))
 
+    def test_carried_subject_without_a_hash_is_found(self):
+        r = self.r
+        r.git("checkout", "-q", "integration")
+        r.git("checkout", "-q", "-b", "side2", "refs/remotes/origin/upstream-main")
+        r.write("sglang_neuron/carried2.py", "c\n")
+        r.commit("carried work 2")
+        r.git("checkout", "-q", "integration")
+        r.git("merge", "-q", "--no-ff", "-m", "Merge upstream PR 17 (owner/repo#17), not run by us", "side2")
+        r.git("update-ref", "refs/remotes/origin/integration", r.git("rev-parse", "HEAD"))
+        sec = self.section(self.run_sh()[1], "carried")
+        self.assertIn("Merge upstream PR 17", sec)
+        self.assertIn("Merge upstream PR #20", sec)
+
     def test_gh_sections_are_printed(self):
         code, out = self.run_sh()
         self.assertIn("#30 -> main", self.section(out, "open pull requests"))

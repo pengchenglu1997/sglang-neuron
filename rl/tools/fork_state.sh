@@ -11,7 +11,7 @@
 #   --no-gh          skip every gh call (and say so)
 # By default the two remotes are fetched first, so the git sections are as fresh as the gh sections.
 # Sections: branches (date, merged into main or integration, keep or delete hint), engine paths main has that integration
-# lacks, carried upstream pull requests (merge subject "Merge upstream PR #N"), mirror freshness, open pull requests of
+# lacks, carried upstream pull requests (merge subject "Merge upstream PR N", with or without #), mirror freshness, open pull requests of
 # the fork, our upstream pull requests and issues, and per upstream head the file-list check of upstream_ready.sh
 # (--skip-tests: it says READY or NOT READY for TEAM paths only; run upstream_ready.sh itself for the CPU tests).
 # Exit status: 0 everything read and every upstream head clean; 2 bad input or git failed; 3 something could not be read
@@ -122,9 +122,9 @@ else
   echo "not read: no $REMOTE/integration"; incomplete=1
 fi
 
-echo "== carried upstream pull requests (merge subject 'Merge upstream PR #N' on integration, not on upstream-main)"
+echo "== carried upstream pull requests (merge subject 'Merge upstream PR N' on integration, not on upstream-main)"
 if [ "$have_integ" = 1 ] && [ "$have_upm" = 1 ]; then
-  carried="$(git log --merges --format=%s "$UPM..$INTEG" | grep -E '^Merge upstream PR #[0-9]+' || true)"
+  carried="$(git log --merges --format=%s "$UPM..$INTEG" | grep -E '^Merge upstream PR #?[0-9]+' || true)"
   if [ -n "$carried" ]; then printf '%s\n' "$carried"; else echo "none"; fi
 else
   echo "not read: $REMOTE/integration or $REMOTE/upstream-main is missing"; incomplete=1
