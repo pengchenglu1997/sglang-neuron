@@ -14,7 +14,7 @@ FAKE_GH = r'''#!/usr/bin/env bash
 repo=""; kind="$1 $2"; heads=0; prev=""
 for a in "$@"; do
   [ "$prev" = "-R" ] && repo="$a"
-  case "$a" in headRefName,headRepositoryOwner) heads=1 ;; esac
+  case "$a" in number,headRefName,headRepositoryOwner) heads=1 ;; esac
   prev="$a"
 done
 case "$repo" in
@@ -46,6 +46,10 @@ class ForkState(unittest.TestCase):
         r.git("update-ref", "refs/remotes/origin/integration", r.git("rev-parse", "HEAD"))
         # main: engine change plus team files; feat/done is merged into it, feat/open is not
         r.git("checkout", "-q", "-b", "mainline", base)
+        r.write("sglang_neuron/bound.py", "b\n")
+        r.commit("engine only, rooted on upstream-main")
+        r.git("update-ref", "refs/remotes/origin/feat/bound", r.git("rev-parse", "HEAD"))
+        r.git("update-ref", "refs/remotes/origin/feat/inpr", r.git("rev-parse", "HEAD"))
         r.write("sglang_neuron/engine.py", "e\n")
         r.write("rl/README.md", "team\n")
         r.commit("engine and team")
@@ -72,7 +76,7 @@ class ForkState(unittest.TestCase):
         self.canned("fork_prs.txt", "#30 -> main [] a team-only change\n")
         self.canned("up_prs.txt", "#22 OPEN fix/clean a fix\n#25 OPEN draft feat/dirty a feature\n#9 MERGED feat/old older\n")
         self.canned("up_issues.txt", "#15 OPEN a proposal\n")
-        self.canned("up_heads.txt", "fix/clean\nfeat/dirty\n")
+        self.canned("up_heads.txt", "22 fix/clean\n25 feat/dirty\n31 feat/inpr\n")
 
     def tearDown(self):
         self.r.close()
@@ -82,10 +86,18 @@ class ForkState(unittest.TestCase):
         with open(os.path.join(self.gh, name), "w", newline="\n") as fh:
             fh.write(text)
 
+    def clean_heads(self):
+        """only heads that are clean: the state is then complete and clean"""
+        self.canned("up_heads.txt", "22 fix/clean\n31 feat/inpr\n")
+
     def run_sh(self, *args, fail=False):
         env = dict(os.environ, FAKE_GH_DIR=self.gh, PATH=self.gh + os.pathsep + os.environ["PATH"])
         if fail:
             env["FAKE_GH_FAIL"] = "1"
+        if "--fetch-now" in args:
+            args = [a for a in args if a != "--fetch-now"]
+        else:
+            args = ["--no-fetch"] + list(args)
         p = subprocess.run(["bash", SH] + list(args), cwd=self.r.dir, env=env, stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE)
         return p.returncode, p.stdout.decode("utf-8", "replace") + p.stderr.decode("utf-8", "replace")
@@ -96,11 +108,17 @@ class ForkState(unittest.TestCase):
 
     def test_branches_merged_state_and_delete_hint(self):
         code, out = self.run_sh()
-        self.assertEqual(code, 0, out)
+        self.assertEqual(code, 4, out)          # feat/dirty holds a TEAM path
         sec = self.section(out, "branches")
         done = [l for l in sec.split("\n") if l.startswith("feat/done")][0]
         self.assertIn("main=yes", done)
-        self.assertIn("merged: delete", done)
+        self.assertIn("not the head of an open upstream pull request: delete", done)   # it holds a team path
+        bound = [l for l in sec.split("\n") if l.startswith("feat/bound")][0]
+        self.assertIn("upstream-bound", bound)
+        self.assertIn("keep", bound)
+        self.assertNotIn("delete", bound)
+        inpr = [l for l in sec.split("\n") if l.startswith("feat/inpr")][0]
+        self.assertIn("head of upstream #31: keep", inpr)
         opn = [l for l in sec.split("\n") if l.startswith("feat/open")][0]
         self.assertIn("main=no integration=no", opn)
         self.assertNotIn("delete", opn)
@@ -146,6 +164,61 @@ class ForkState(unittest.TestCase):
         code, out = self.run_sh("--no-gh")
         self.assertEqual(code, 3)
         self.assertIn("not read (--no-gh)", out)
+
+    def test_exit_0_only_when_everything_is_read_and_clean(self):
+        self.clean_heads()
+        code, out = self.run_sh()
+        self.assertEqual(code, 0, out)
+
+    def test_dirty_head_has_its_own_exit_code(self):
+        code, out = self.run_sh()
+        self.assertEqual(code, 4, out)
+        self.assertIn("feat/dirty (upstream #25): exit 1", out)
+
+    def test_no_upstream_remote_ref_is_not_read_and_exit_3(self):
+        self.clean_heads()
+        self.r.git("update-ref", "-d", "refs/remotes/upstream/main")
+        code, out = self.run_sh()
+        self.assertEqual(code, 3, out)
+        self.assertIn("not read", self.section(out, "mirror"))
+
+    def test_missing_integration_or_upstream_main_is_exit_3(self):
+        self.clean_heads()
+        self.r.git("update-ref", "-d", "refs/remotes/origin/integration")
+        code, out = self.run_sh()
+        self.assertEqual(code, 3, out)
+        self.assertIn("not read", self.section(out, "engine paths"))
+        self.assertIn("not read", self.section(out, "carried"))
+
+    def test_head_without_its_branch_is_exit_3_even_inside_the_loop(self):
+        self.canned("up_heads.txt", "22 fix/clean\n40 fix/gone\n")
+        code, out = self.run_sh()
+        self.assertEqual(code, 3, out)
+        self.assertIn("fix/gone (upstream #40): not read, no origin/fix/gone", out)
+
+    def test_heads_not_read_gives_no_delete_hint(self):
+        code, out = self.run_sh("--no-gh")
+        done = [l for l in self.section(out, "branches").split("\n") if l.startswith("feat/done")][0]
+        self.assertIn("not read", done)
+        self.assertNotIn("delete after", done)
+
+    def test_fetch_is_the_default_and_a_failed_fetch_is_bad_input(self):
+        code, out = self.run_sh("--fetch-now")      # the throw-away repository has no remote named origin
+        self.assertEqual(code, 2, out)
+        self.assertIn("git fetch origin failed", out)
+
+    def test_age_of_the_last_fetch_is_printed_and_stale_is_warned(self):
+        code, out = self.run_sh()
+        self.assertIn("age of the remote-tracking refs is unknown", self.section(out, "fetch"))
+        fh = self.r.git("rev-parse", "--git-path", "FETCH_HEAD")
+        fh = fh if os.path.isabs(fh) else os.path.join(self.r.dir, fh)
+        with open(fh, "w") as f:
+            f.write("")
+        self.assertNotIn("stale", self.section(self.run_sh()[1], "fetch"))
+        self.assertIn("minutes ago", self.section(self.run_sh()[1], "fetch"))
+        old = 1_700_000_000
+        os.utime(fh, (old, old))
+        self.assertIn("may be stale", self.section(self.run_sh()[1], "fetch"))
 
     def test_missing_main_is_bad_input(self):
         self.r.git("update-ref", "-d", "refs/remotes/origin/main")
