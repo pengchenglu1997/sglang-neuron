@@ -1,0 +1,8 @@
+# Switches whose default is not off, accepted on purpose (F5, rl/tools/switches.py --check).
+# One line per switch: <NAME><TAB><reason>. A new path sits behind a switch that is off by default (rl/METHOD.md);
+# a switch that defaults to on or to a mode name needs a line here. Adding one is a tier-3 change (rl/tools/).
+# main holds no such switch. integration holds one, carried from an upstream pull request that we merged unchanged
+# (it is not our change, and its mode default is the upstream author's). The switches of feat/lora-merge-kernel
+# whose default is not off (RLKIT_DECODE_LADDER, RLKIT_LAZY_DELTA, RLKIT_DEVICE_WRITE, RLKIT_KERNEL_CHECK,
+# RLKIT_KERNEL_FACTORS, RLKIT_KERNEL_IMPL) are listed when that branch reaches main.
+SGLANG_NEURON_MOE_PREFILL	default is the mode auto; carried from upstream pull request 17, merged on integration, not our change
