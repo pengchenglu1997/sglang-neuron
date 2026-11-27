@@ -436,6 +436,7 @@ Reading, with limits:
 - One run each, one model size, one tensor-parallel layout. None of this is a statement about 8B or about 27-32B.
 - Added 2026-11-26: the LM head's weight layout is now a switch on `main`, `SGLANG_NEURON_LM_HEAD_PRETRANSPOSED=1`
   (no kernel of its own; [RESULTS.md](RESULTS.md) section 9 has its trn2 speed and correctness rows). Device profiles
-  of those servers were analysed later (`devprof/`, `prof_all/` in the public data folder, linked from
-  [RESULTS.md](RESULTS.md) section 9); this table has no row for it and does not state whether the per-step transpose
+  of separate starts with the same switch (`lmh_on`, `lmh_off`, `devprof/records` in the public data folder, linked from
+  [RESULTS.md](RESULTS.md) section 9) were analysed later (`devprof/`); the profiles of the section 9 starts themselves
+  were not analysed. This table has no row for it and does not state whether the per-step transpose
   of the vocabulary shard is gone.
