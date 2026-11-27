@@ -10,7 +10,9 @@ Read this first:
   on hardware for the first time on 2026-11-24 (Qwen3-0.6B in a server, 8B shards outside a server). It is not called
   validated: its acceptance rule is open (section 1).
 - The sampler kernel (branch `feat/sampler-kernel`) was built and run on hardware on 2026-11-24, at Qwen3-0.6B and
-  Qwen3-8B, for the `temperature` sampler only (section 2).
+  Qwen3-8B, for the `temperature` sampler only (section 2). Changed 2026-11-26: the same kernel is used in the
+  `topk_topp` mode on branch `feat/sampler-kernel-topk-topp`, in the CPU tests and the NKI simulator only (section 2,
+  "`topk_topp` mode").
 - Every number has a condition and a source file. Numbers marked "estimate" are not measurements. A "target" is a
   target, with its basis.
 - All profile numbers in section 5 are Qwen3-0.6B, TP4, one run each, from 2026-11-21. The hardware results of 2026-11-24
@@ -196,7 +198,8 @@ winner, and the log-sum-exp. One kernel per rank does this over the rank's 37,98
 rows fill the 128 partitions, walks the columns in chunks of 2,048, and writes 4 partial values per partition and chunk.
 The merge of the partials, the raw logit at the winner, the all-gather and the global merge stay the engine's code.
 `topk_topp`, greedy-only mode and top-logprobs above zero keep the torch path (top-logprobs above zero with the switch on
-raises an error).
+raises an error). Changed 2026-11-26: `topk_topp` has a switch of its own on a CPU-only branch (subsection "`topk_topp`
+mode" below).
 
 Where it is. Branch `feat/sampler-kernel` of this fork, on top of v0.1.0: `sglang_neuron/sampling.py` (the released file
 plus one import-time constant and one guarded branch) and a new file `sglang_neuron/rlkit_sampler_kernel.py`. Switch: `RLKIT_SAMPLER_KERNEL=1`. Unset or 0, the released code path runs. Kernel
@@ -211,7 +214,8 @@ global top 256 tokens per row (`TOP_K_MAX`); `temperature` mode does not apply t
 admission. On a device-sampling server, a request with top-k and top-p therefore runs in `topk_topp` mode. The kernel designed here replaces the
 `temperature` mode only, so it would not run under that setting. Changed 2026-11-25: the kernel as built replaces the
 `temperature` mode only, so it still does not cover that setting. Covering it needs a `topk_topp` mode kernel, which does
-not exist.
+not exist. Changed 2026-11-26: a `topk_topp` path with the same kernel exists in the CPU simulator only (subsection
+"`topk_topp` mode" below); on hardware the setting is still not covered.
 
 The conclusion that stood here on 2026-11-23, "the sampler kernel is not scheduled; the second kernel is chosen from a
 device profile", no longer holds: the kernel was built and run on 2026-11-24. The device profiles taken in that session
@@ -246,7 +250,7 @@ concurrency 1 / 8 / 32, two passes each:
 
 Limits:
 
-- the `temperature` sampler only; the `topk_topp` mode is not covered;
+- the `temperature` sampler only; the `topk_topp` mode is not covered on hardware (a CPU-simulator path exists, below);
 - Qwen3-0.6B and Qwen3-8B only; nothing at 27 to 32B;
 - the gain at 8B is about 5 percent;
 - not run inside a full RL loop (a sampled rollout bench ran);
@@ -256,7 +260,72 @@ Limits:
   without the kernel.
 
 What remains: a `topk_topp` mode kernel; a full RL loop with the kernel on; larger models; a proposal upstream (nothing
-has been sent).
+has been sent). Changed 2026-11-26: the `topk_topp` path below is written and CPU-tested; its hardware run remains.
+
+### `topk_topp` mode (CPU simulator only, 2026-11-26)
+
+Status: written and tested on the CPU and in the NKI 0.7.0 simulator only. Not run on a device. No speed claim. The test
+results are recorded in the team hub, not here (cpu-only work). Branch `feat/sampler-kernel-topk-topp`, a `cpu-only`
+pull request to `integration`; switch `RLKIT_SAMPLER_KERNEL_TOPK=1` (unset or 0: the released function body runs).
+
+What it replaces. Of the shard-local stage of `sample_filtered_sharded_logits` (`sampling.py` v0.1.0, lines 372-386)
+only the unfiltered draw: the per-column hash noise, the Gumbel score, the shard maximum and its smallest id. These come
+from `gumbel_partials`, the `temperature` mode's kernel, called unchanged; the merge is the engine's tie rule, as in that
+mode. New file `sglang_neuron/rlkit_sampler_topk.py`; it holds no NKI code. The temperature kernel's file is not changed,
+so its upstream draft pull request is not touched.
+
+What stays the engine's torch code, and why:
+- both log-sum-exps. The tempered one gives the pool probabilities that the top-p and min-p tests compare; a kernel
+  exp-sum, which differs from torch in the last bits, could move a row across a top-p boundary;
+- the shard pool top-k (`_pool_topk`: on a device nkilib's rotational kernel where one fits the shape, else the
+  reduction-based `_exact_topk`), the raw-logit gather, and every line after
+  the payload (all-gather, shard winner, pool sort, cumulative probability, keep mask, pool draw with torch noise,
+  logprobs, top logprobs), copied verbatim from v0.1.0 lines 387-416; a test checks the text.
+
+Consequence. A restricted sampled row (top-k below SGLang's "all" value, top-p below 1 or min-p above 0, temperature
+above 0) gets its token and logprob from the released code on the same inputs: the kernel's result is not read for it
+(a test puts garbage in place of the kernel's result and these rows stay bit-equal). The kernel's result is read for
+temperature-0 rows (max and smallest id: exact) and for unrestricted sampled rows (noise from the kernel's own `log`,
+which in the simulator differs from `torch.log` in the last bits for some inputs, so a near-tie can be drawn
+differently; on hardware the `temperature` mode gave 44 of 60 equal sequences at the same seeds, section above).
+
+Tests (`tests/rlkit_sampler/selftest_sampler_topk.py`; method and list in `tests/rlkit_sampler/README.md`): against the
+released `topk_topp` path over a simulated TP4 group, bit-equal outputs with the kernel's CPU reference for top-k 1 / 50 /
+256 / off, top-p 0.5 / 0.95 / 1, min-p 0 / 0.1, temperature-0 rows, mixed per-row settings, ties, rows 1 / 8 / 32; the
+switch unset leaves the released path; planted faults are caught; in the simulator, restricted rows bit-equal and
+temperature-0 tokens equal. Whether these hold on a device is not known.
+
+Compile flags. `models/host.py` (`neuron_compiler_args`) keeps the default arguments for a decode that traces the device
+top-k, which `topk_topp` always does, because `-O2` miscompiles that top-k (section "The compile-flag question" below).
+This branch does not change that rule. So the kernel would compile at the default arguments in this mode, a
+configuration none of its hardware runs used (those were `temperature` decodes, by the code at `-O2`). Not known until
+run.
+
+Compile cache. `sampling.py` and `rlkit_sampler_topk.py` are kernel sources of the cache digest (`kernel_sources` follows
+the imports of a kernel file), so a server built from this branch gets another digest than one built from
+`integration`, with the switch on or off; a cache folder stamped by an `integration` server is refused.
+
+Not known until run on a device:
+- whether the decode graph with the kernel next to the rotational top-k loads and runs: the engine's comment records
+  that a GpSimd top-k hung the GpSimd engine when co-resident with vector work in one NEFF, and this kernel uses GpSimd
+  integer multiplies;
+- whether restricted rows give the released server's tokens (expected by construction; another graph may order float
+  work differently);
+- any speed. In the RL setting every sampled row is restricted, so the kernel's noise pass and its log-sum-exp
+  partials are computed and thrown away; the path removes the torch noise pass and the torch full-width maximum, and
+  whether that saves any time is not known.
+  The released `topk_topp` sampler's speed is in [RESULTS.md](RESULTS.md) section 8.4.
+
+Designs considered and not taken (2026-11-26):
+- a fused filter kernel (shard top-k by `max8` rounds, cumulative mass by a vector scan, a cut-off value instead of the
+  pool sort): more device work removed, but its cumulative sum is not the released matmul bit for bit, so it could not
+  give the released tokens at top-p boundaries, and it replaces the rotational top-k, whose tie order the released path
+  leaves unspecified;
+- a certified unfiltered draw (top-8 candidates per chunk from the kernel, rescored with the released torch ops, plus a
+  per-row certificate that the released winner is among them): would make unrestricted sampled rows exact too, needs new
+  NKI ops (`max8`, `nc_match_replace8`) and a device bound on the `log` error; a follow-up candidate;
+- a runtime skip of the noise pass when every sampled row is restricted (a register-loaded loop bound): simulator-only
+  feature, not used here.
 
 ### Measured basis (written 2026-11-23, before the kernel existed)
 

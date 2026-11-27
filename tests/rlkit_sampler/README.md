@@ -1,7 +1,12 @@
-# Sampler kernel for SGLang-Neuron v0.1.0 (temperature sampler)
+# Sampler kernel for SGLang-Neuron v0.1.0 (temperature sampler; topk_topp mode in the CPU simulator only)
 
 One NKI kernel that replaces the shard-local stage of the engine's temperature sampler. It is off by default. Changed
 2026-11-25: it was sent upstream as draft pull request 25 (sgl-project/sglang-neuron) from branch `feat/sampler-kernel`.
+
+Changed 2026-11-26: branch `feat/sampler-kernel-topk-topp` (a `cpu-only` pull request to `integration`) uses the same
+kernel, unchanged, in the `topk_topp` mode behind a second switch, `RLKIT_SAMPLER_KERNEL_TOPK=1`. That part has run in
+the CPU tests and the NKI simulator only; nothing of it has run on a device. See [topk_topp mode](#topk_topp-mode-cpu-and-simulator-only)
+below. Everything else on this page is about the `temperature` mode.
 
 Where it is: written on branch `feat/sampler-kernel`, on top of `4e24326`, the v0.1.0 snapshot (the commit
 `feat/inplace-adapter-sync` and `feat/lora-merge-kernel` also start from; the kernel does not depend on either of
@@ -10,11 +15,13 @@ them). Since 2026-11-25 it is also in `main` and `integration`. Every measuremen
 
 | File | What |
 |---|---|
-| `sglang_neuron/sampling.py` | The released file plus one import-time constant and one guarded branch (8 added lines, 0 removed). |
+| `sglang_neuron/sampling.py` | The released file plus one import-time constant and one guarded branch (8 added lines, 0 removed). On `feat/sampler-kernel-topk-topp`: a second constant and a second guarded branch, in `sample_filtered_sharded_logits` (14 added lines in all, 0 removed). |
 | `sglang_neuron/rlkit_sampler_kernel.py` | New. The NKI kernel, a CPU reference of it, and the function the guarded branch calls. |
+| `sglang_neuron/rlkit_sampler_topk.py` | New on `feat/sampler-kernel-topk-topp`. The `topk_topp` function its guarded branch calls (no NKI code of its own). |
 | `tests/rlkit_sampler/selftest_sampler_kernel.py` | CPU tests and NKI simulator tests. |
+| `tests/rlkit_sampler/selftest_sampler_topk.py` | New on `feat/sampler-kernel-topk-topp`. CPU and NKI simulator tests of the `topk_topp` path. |
 | `tests/rlkit_sampler/released_sampling_v0.1.0.py` | The released `sampling.py`, for the selftest where git cannot read this checkout. |
-| `tests/rlkit_sampler/hardware/` | The three scripts of the trn2 runs described below. |
+| `tests/rlkit_sampler/hardware/` | The three scripts of the trn2 runs described below, and `85_sampler_topk_hw.py` for the `topk_topp` path (not run). |
 
 ## What it replaces
 
@@ -39,8 +46,8 @@ the smallest id holding it, the chunk maximum of the logits, and the sum of `exp
 
 What stays the engine's: the merge of the partials per row (`_max_smallest_id`), the gather of the raw logit at the
 winner, the payload, the all-gather, `_shard_winner` and the final logprob (the lines of `sample_sharded_logits` after
-the shard-local stage are copied unchanged). `topk_topp` mode, `greedy` mode and top logprobs > 0 are not touched. With
-the switch on, a request for top logprobs > 0 raises.
+the shard-local stage are copied unchanged). `greedy` mode and top logprobs > 0 are not touched by this switch, and
+neither is `topk_topp` mode (it has its own switch, below). With the switch on, a request for top logprobs > 0 raises.
 
 The kernel computes the noise itself, with the engine's hash. Passing the engine's noise in from torch would keep most
 of the cost the kernel is meant to remove.
@@ -179,7 +186,8 @@ CPU torch: 11 of 11 passed (also run again on this branch, same result).
 
 ## Limits
 
-- Temperature sampler only. `topk_topp` and `greedy` are untouched, and top logprobs > 0 raises with the switch on.
+- Temperature sampler only on hardware. `greedy` is untouched, and top logprobs > 0 raises with the switch on. The
+  `topk_topp` path has run in the CPU tests and the simulator only (section below).
 - Qwen3-0.6B and Qwen3-8B only, TP4 (and TP1 at 0.6B), on one trn2.48xlarge. Other models, other vocabulary sizes and
   padded vocabularies were not run (a padded shard keeps the mask in torch; not run).
 - The gain at 8B is small: 4.5 to 6.6 percent over the six cells above (from the unrounded values; the rounded table
@@ -209,12 +217,74 @@ CPU torch: 11 of 11 passed (also run again on this branch, same result).
   released sampler's, and the token comparison under concurrency (above) differs on some requests, but the log shows the
   kernel for one row count only.
 
+## topk_topp mode (CPU and simulator only)
+
+Branch `feat/sampler-kernel-topk-topp`, a `cpu-only` pull request to `integration`. Nothing here has run on a device,
+and there is no speed claim. The CPU and simulator results are recorded in the team hub, not here (AGENTS.md rule 6).
+
+Switch: `RLKIT_SAMPLER_KERNEL_TOPK=1` with `SGLANG_NEURON_SAMPLER=topk_topp`, read once at import. Unset or `0` runs the
+released function body; `RLKIT_SAMPLER_KERNEL=1` does not reach the `topk_topp` mode.
+
+What it does. The released `sample_filtered_sharded_logits` runs, per rank over `[R, 37984]`: the padded-vocabulary
+mask, the Gumbel noise and score, the shard maximum and its smallest id (the unfiltered draw), the raw logit at the
+winner, two log-sum-exps and the shard's top 256 (`_pool_topk`); then, after the all-gather, the pool sort, the filter
+probabilities, the keep mask and the draw over the kept pool. With the switch on, only the unfiltered draw is replaced:
+by `gumbel_partials`, the temperature mode's kernel, called unchanged, and merged with the engine's tie rule as in the
+temperature mode. Everything else is the engine's torch code: the log-sum-exps (torch.logsumexp, as released), the pool
+top-k, the raw-logit gather, and the lines after the payload, copied verbatim (a test checks the text).
+
+Why only that. The tempered log-sum-exp feeds the probabilities that the top-p and min-p tests compare, so a kernel
+exp-sum, which differs from torch in the last bits, could move a row across a top-p boundary. Keeping it in torch means
+that a restricted sampled row (top-k below the "all" value, top-p below 1 or min-p above 0) gets its token and logprob
+from the released code on the same inputs, whatever the kernel computes. The kernel's result is read only for
+temperature-0 rows (a max and a smallest id, exact) and for unrestricted sampled rows (noise from the kernel's own `log`;
+the simulator's `log` is not `torch.log` bit for bit, so such a row can draw another token at a near-tie, as the
+temperature mode does on hardware). The kernel's log-sum-exp partials are still computed and not used. In the RL setting
+(every sampled row restricted) the kernel's noise pass is work whose result is thrown away; removing it needs a
+kernel without the noise, or a runtime skip, which this branch does not have.
+
+Tests, `tests/rlkit_sampler/selftest_sampler_topk.py` (CPU; `--sim` adds the NKI simulator), against the released
+`sample_filtered_sharded_logits` over a simulated TP4 group:
+- K0: the switch unset or `0` runs the released body (bit-equal outputs, the new module never imported); `1` routes to
+  the kernel path.
+- K1, K2: with the CPU reference of the kernel, the whole output (token ids, logprobs, top logprobs) is bit-equal for
+  top-k 1 / 50 / 256 / off, top-p 0.5 / 0.95 / 1, min-p 0 / 0.1, temperatures 0 / 0.6 / 0.8 / 1.0, rows 1 / 8 / 32,
+  mixed per-row settings in one batch, top logprobs 0 and 20, and `SGLANG_RETURN_ORIGINAL_LOGPROB` off and on.
+- K3: ties (at the top of the pool, across the top-k cut, equal maxima of greedy rows across ranks), constant rows,
+  -inf columns.
+- K4: with garbage in place of the kernel's result, restricted sampled rows stay bit-equal and the other rows change.
+- K5: planted faults that must be caught (wrong noise column, wrong row key, no tie rule, filters ignored). The noise
+  faults are visible only on unrestricted sampled rows, so those batches use them.
+- K6: `sampling.py` is the released file plus the two guarded branches; its other functions have the released bytecode;
+  the copied tail is the released text.
+- K7: `backend/compile_cache.py` counts `rlkit_sampler_topk.py` among the kernel sources.
+- SIM: the kernel stage is the NKI kernel in `nki.simulate`. Restricted rows must be bit-equal and temperature-0 rows
+  must have equal tokens; unrestricted sampled rows are counted, not required.
+`selftest_sampler_kernel.py`'s T5 now allows the second guarded branch.
+
+Compile cache. `sampling.py` and the new file are kernel sources in the cache digest (`kernel_sources` follows the
+imports of a kernel file), so a server built from this branch has another digest than one built from `integration`,
+with the switch on or off. Give it a compile-cache folder of its own.
+
+Compile flags. `models/host.py` keeps the decode graph at the default arguments (not `-O2`) whenever the mode is
+`topk_topp`, because `-O2` miscompiles the device top-k; this branch does not change that. The temperature kernel's
+hardware runs were in a decode that, by the code, compiled at `-O2`; how the kernel compiles and runs at the default
+arguments is not known until run.
+
+Not known until run on a device: whether the decode graph with the kernel and the rotational top-k together loads and
+runs (the engine records that a GpSimd top-k hung when co-resident with vector work in one NEFF; this kernel uses GpSimd
+integer multiplies); whether restricted rows then give the released server's tokens; any speed. The script
+`hardware/85_sampler_topk_hw.py` checks these (not run): released `topk_topp` servers A and A2 (control) against the
+kernel server B, temperature 0, the RL setting and a min-p setting with seeds (must match), unfiltered sampled requests
+(counted), the kernel's log line, concurrent requests (information only), and an optional llmbench.
+
 ## Run it
 
 CPU and simulator test (WSL with a venv that has NKI 0.7.0 and CPU torch; no device):
 
 ```
 python tests/rlkit_sampler/selftest_sampler_kernel.py --sim
+python tests/rlkit_sampler/selftest_sampler_topk.py --sim
 ```
 
 Without `--sim` the NKI simulator is skipped. The released `sampling.py` is read with `git show v0.1.0:...`; if git
@@ -222,7 +292,9 @@ cannot read the checkout, the copy in the tests folder is used.
 
 Hardware scripts, `tests/rlkit_sampler/hardware/`: `82_sampler_kernel_hw.py` (three servers: released temperature,
 kernel, released greedy; checks and benchmarks; Qwen3-0.6B), `83_sampler_check2.py` (the second correctness check, with
-controls), `84_sampler_kernel_8b.py` (the same as 82 on Qwen3-8B). They are not self-contained. They import the launcher
+controls), `84_sampler_kernel_8b.py` (the same as 82 on Qwen3-8B), `85_sampler_topk_hw.py` (the `topk_topp` path, not run yet; it
+imports 82 and mounts `patches/sglang_neuron_v0.1.0_sampler_kernel_topk/` holding `sampling.py`,
+`rlkit_sampler_kernel.py` and `rlkit_sampler_topk.py`). They are not self-contained. They import the launcher
 kit of the companion repository, [pengchenglu1997/trainium-sglang-rl](https://github.com/pengchenglu1997/trainium-sglang-rl)
 (`81_opt_sweep.py`, `server_ctl.py`, `rl_common.py`, `rollout_client.py`, `backends.json`, `srv_sglang_neuron.sh`,
 `22b_llmbench_grid.sh`, and the scripts these call), which is not copied here. Put them in that kit's folder, with the two

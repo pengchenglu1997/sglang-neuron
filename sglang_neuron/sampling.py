@@ -257,6 +257,8 @@ def sampled_positions(positions: torch.Tensor, sampling_positions: torch.Tensor)
 
 # RLKIT patch: read once at import (a launch constant, like MAX_TOP_LOGPROBS above), so the traced forward sees a bool
 _RLKIT_SAMPLER_KERNEL = os.environ.get("RLKIT_SAMPLER_KERNEL", "0").strip() == "1"
+# RLKIT patch: the topk_topp mode's switch (rlkit_sampler_topk.py), read once at import as the one above
+_RLKIT_SAMPLER_KERNEL_TOPK = os.environ.get("RLKIT_SAMPLER_KERNEL_TOPK", "0").strip() == "1"
 
 
 def sample_sharded_logits(logits, group, rank, vocabulary_size, temperatures, row_keys,
@@ -369,6 +371,10 @@ def sample_filtered_sharded_logits(logits, group, rank, vocabulary_size, tempera
     candidates = TOP_K_MAX if candidates is None else candidates
     if not 0 <= top_logprobs <= candidates <= width:
         raise ValueError(f"need top_logprobs ({top_logprobs}) <= candidates ({candidates}) <= shard width ({width})")
+    if _RLKIT_SAMPLER_KERNEL_TOPK:  # RLKIT patch: the unfiltered draw by the NKI kernel (rlkit_sampler_topk.py)
+        from sglang_neuron import rlkit_sampler_topk
+        return rlkit_sampler_topk.sample_filtered_sharded_logits_kernel(
+            logits, group, rank, vocabulary_size, temperatures, row_keys, filters, top_logprobs, candidates)
     logits, sampled, inverse, score = _tempered_scores(logits, rank, vocabulary_size, temperatures, row_keys)
     # Shard candidates via the NKI rotational top-k, on the fp32 masked logits (the values the merge
     # uses). fp32 selects the rotational kernel deliberately: the GpSIMD nisa.topk kernel deadlocks
